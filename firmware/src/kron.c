@@ -2,6 +2,7 @@
 #include <string.h>
 
 static int bitlen64(uint64_t x) { int b = 0; while (x) { b++; x >>= 1; } return b; }
+static uint64_t absmax(int32_t lo, int32_t hi) { const int64_t a = lo < 0 ? -(int64_t)lo : lo, b = hi < 0 ? -(int64_t)hi : hi; return (uint64_t)(a > b ? a : b); }
 
 int kron_plan(const KronCase* cs, int c, KronPlan* p) {
   if (c < 1 || c > KRON_MAX_CHUNKS) return -1;
@@ -13,21 +14,26 @@ int kron_plan(const KronCase* cs, int c, KronPlan* p) {
   p->hw = (words + 15) & ~15u;
   if (p->hw > KRON_MAX_WORDS) return -1;
   if (p->w > 57) return -1;                       // slot extraction reads at most three words
+  // largest magnitude any accumulator slot, prefix sum or shift term can reach; two of them are subtracted, so stay below 2^30
+  const uint64_t n = (uint64_t)cs->n, ma = absmax(cs->amin, cs->amax), mb = absmax(cs->bmin, cs->bmax);
+  const uint64_t bound = n * da * db + p->ob * n * ma + p->oa * n * mb + (uint64_t)p->oa * p->ob * n;
+  p->narrow = bound < (1ull << 30) && p->w <= 32;
   return 0;
 }
 
 void kron_pack(const KronPlan* p, const int32_t* v, uint32_t off, int chunk, uint32_t* out) {
   memset(out, 0, p->hw * 4);
   const int base = chunk * p->m;
+  const int cnt = base + p->m <= p->n ? p->m : p->n - base;
   uint32_t pos = 0;
-  for (int i = 0; i < p->m; i++, pos += p->w) {
-    const int idx = base + i;
-    if (idx >= p->n) break;
-    const uint64_t x = (uint64_t)(uint32_t)(v[idx] + (int32_t)off) << (pos & 31);
-    out[pos >> 5] |= (uint32_t)x;
-    if (x >> 32) out[(pos >> 5) + 1] |= (uint32_t)(x >> 32);
+  for (int i = 0; i < cnt; i++, pos += p->w) {
+    const uint32_t x = (uint32_t)(v[base + i] + (int32_t)off), sh = pos & 31, wi = pos >> 5;
+    out[wi] |= x << sh;
+    if (sh) { const uint32_t hi = x >> (32 - sh); if (hi) out[wi + 1] |= hi; }
   }
 }
+
+uint32_t kron_acc_bytes(const KronPlan* p) { return (uint32_t)(2 * p->c * p->m) * (p->narrow ? 4 : 8); }
 
 static inline uint64_t get_slot(const uint32_t* z, uint32_t pos, int w) {
   const uint32_t wi = pos >> 5, sh = pos & 31;
@@ -36,49 +42,77 @@ static inline uint64_t get_slot(const uint32_t* z, uint32_t pos, int w) {
   return x & ((1ULL << w) - 1);
 }
 
-void kron_accum(const KronPlan* p, const uint32_t* z, int ci, int cj, uint64_t* acc) {
-  uint64_t* d = acc + (ci + cj) * p->m;
-  uint32_t pos = 0;
-  for (int k = 0; k < 2 * p->m - 1; k++, pos += p->w) d[k] += get_slot(z, pos, p->w);
+void kron_accum(const KronPlan* p, const uint32_t* z, int ci, int cj, void* acc) {
+  const int cnt = 2 * p->m - 1; const int w = p->w;
+  if (p->narrow) {
+    uint32_t* d = (uint32_t*)acc + (ci + cj) * p->m;
+    const uint32_t mask = w == 32 ? 0xFFFFFFFFu : (1u << w) - 1;
+    uint32_t pos = 0;
+    for (int k = 0; k < cnt; k++, pos += w) {
+      const uint32_t wi = pos >> 5, sh = pos & 31;
+      const uint32_t x = (z[wi] >> sh) | ((z[wi + 1] << 1) << (31 - sh));      // two shifts so that sh = 0 needs no special case
+      d[k] += x & mask;
+    }
+  } else {
+    uint64_t* d = (uint64_t*)acc + (ci + cj) * p->m;
+    uint32_t pos = 0;
+    for (int k = 0; k < cnt; k++, pos += w) d[k] += get_slot(z, pos, w);
+  }
 }
 
-void kron_prefix(const int32_t* v, int n, int64_t* pre) {
-  int64_t s = 0; pre[0] = 0;
-  for (int i = 0; i < n; i++) { s += v[i]; pre[i + 1] = s; }
-}
-
-// slot k of the linear product after the shifts are removed
-static inline int64_t unshifted(const KronPlan* p, const uint64_t* acc, const int64_t* pa, const int64_t* pb, int k) {
+void kron_prefix(const KronPlan* p, const int32_t* a, const int32_t* b, void* pa, void* pb) {
   const int n = p->n;
-  const int lo = k - n + 1 > 0 ? k - n + 1 : 0, hi = k < n - 1 ? k : n - 1;
-  int64_t v = (int64_t)acc[k];
-  if (p->ob) v -= (int64_t)p->ob * (pa[hi + 1] - pa[lo]);
-  if (p->oa) v -= (int64_t)p->oa * (pb[k - lo + 1] - pb[k - hi]);
-  if (p->oa && p->ob) v -= (int64_t)p->oa * p->ob * (hi - lo + 1);
-  return v;
+  if (p->narrow) {
+    if (p->ob) { int32_t* r = (int32_t*)pa; int32_t s = 0; r[0] = 0; for (int i = 0; i < n; i++) { s += a[i]; r[i + 1] = s; } }
+    if (p->oa) { int32_t* r = (int32_t*)pb; int32_t s = 0; r[0] = 0; for (int i = 0; i < n; i++) { s += b[i]; r[i + 1] = s; } }
+  } else {
+    if (p->ob) { int64_t* r = (int64_t*)pa; int64_t s = 0; r[0] = 0; for (int i = 0; i < n; i++) { s += a[i]; r[i + 1] = s; } }
+    if (p->oa) { int64_t* r = (int64_t*)pb; int64_t s = 0; r[0] = 0; for (int i = 0; i < n; i++) { s += b[i]; r[i + 1] = s; } }
+  }
 }
 
-static inline int32_t red(int64_t d, uint32_t q) {
+static inline int32_t red64(int64_t d, uint32_t q) {
   int32_t r;
-  if (d >= INT32_MIN && d <= INT32_MAX) r = (int32_t)d % (int32_t)q;       // the 32-bit divide is much cheaper than __moddi3 on the LX6
+  if (d >= INT32_MIN && d <= INT32_MAX) r = (int32_t)d % (int32_t)q;
   else r = (int32_t)(d % (int64_t)q);
   return r < 0 ? r + (int32_t)q : r;
 }
 
-void kron_finish(const KronPlan* p, const uint64_t* acc, const int64_t* pa, const int64_t* pb, int32_t* out) {
-  const int n = p->n;
-  for (int k = 0; k < n; k++) {
-    int64_t d = unshifted(p, acc, pa, pb, k);
-    if (k + n <= 2 * n - 2) d -= unshifted(p, acc, pa, pb, k + n);
-    out[k] = red(d, p->cs->q);
+// Slot k of the linear product after the shifts are removed. With i the index into a and j = k - i into b:
+//   k < n:  i = 0..k            window sum of a = pa[k+1],            of b = pb[k+1],            terms k+1
+//   k >= n: i = k-n+1..n-1      window sum of a = pa[n] - pa[k-n+1],  of b = pb[n] - pb[k-n+1],  terms 2n-1-k
+#define UNSHIFT_LOOP(T, ACC, PA, PB, P)                                                                                     \
+  for (int k = 0; k < 2 * n - 1; k++) {                                                                                      \
+    T sa = 0, sb = 0, cnt;                                                                                                   \
+    if (k < n) { if (ob) sa = PA[k + 1]; if (oa) sb = PB[k + 1]; cnt = k + 1; }                                              \
+    else       { if (ob) sa = PA[n] - PA[k - n + 1]; if (oa) sb = PB[n] - PB[k - n + 1]; cnt = 2 * n - 1 - k; }              \
+    P[k] = ACC[k] - (T)ob * sa - (T)oa * sb - (T)oa * (T)ob * cnt;                                                           \
+  }
+
+static union { int32_t n32[2 * KRON_MAX_N]; int64_t n64[2 * KRON_MAX_N]; } scratch;      // shifted-out linear product, shared by both paths
+
+void kron_finish(const KronPlan* p, const void* acc, const void* pa, const void* pb, int32_t* out) {
+  const int n = p->n; const uint32_t q = p->cs->q; const uint32_t oa = p->oa, ob = p->ob;
+  if (p->narrow) {
+    int32_t* P = scratch.n32;
+    const uint32_t* A = (const uint32_t*)acc; const int32_t* PA = (const int32_t*)pa; const int32_t* PB = (const int32_t*)pb;
+    UNSHIFT_LOOP(int32_t, A, PA, PB, P)
+    P[2 * n - 1] = 0;
+    for (int k = 0; k < n; k++) { int32_t r = (P[k] - P[k + n]) % (int32_t)q; out[k] = r < 0 ? r + (int32_t)q : r; }
+  } else {
+    int64_t* P = scratch.n64;
+    const uint64_t* A = (const uint64_t*)acc; const int64_t* PA = (const int64_t*)pa; const int64_t* PB = (const int64_t*)pb;
+    UNSHIFT_LOOP(int64_t, A, PA, PB, P)
+    P[2 * n - 1] = 0;
+    for (int k = 0; k < n; k++) out[k] = red64(P[k] - P[k + n], q);
   }
 }
 
 void kron_ref_negacyclic(int n, uint32_t q, const int32_t* a, const int32_t* b, int32_t* out) {
-  int64_t t[2 * KRON_MAX_ACC / 2 + 8];
+  int64_t t[2 * KRON_MAX_N + 8];
   for (int i = 0; i < 2 * n; i++) t[i] = 0;
   for (int i = 0; i < n; i++) for (int j = 0; j < n; j++) t[i + j] += (int64_t)a[i] * b[j];
-  for (int k = 0; k < n; k++) out[k] = red(t[k] - t[k + n], q);
+  for (int k = 0; k < n; k++) out[k] = red64(t[k] - t[k + n], q);
 }
 
 void kron_sw_mul(const uint32_t* x, const uint32_t* y, uint32_t hw, uint32_t* z) {
@@ -93,13 +127,13 @@ void kron_sw_mul(const uint32_t* x, const uint32_t* y, uint32_t hw, uint32_t* z)
 #ifndef KRON_NO_SW
 void kron_mul_sw(const KronPlan* p, const int32_t* a, const int32_t* b, int32_t* out) {
   static uint32_t A[KRON_MAX_CHUNKS * KRON_MAX_WORDS], B[KRON_MAX_CHUNKS * KRON_MAX_WORDS], z[KRON_ZWORDS];
-  static uint64_t acc[KRON_MAX_ACC]; static int64_t pa[513], pb[513];
-  memset(acc, 0, sizeof acc);
+  static uint64_t acc[KRON_MAX_ACC]; static int64_t pa[KRON_MAX_N + 1], pb[KRON_MAX_N + 1];
+  memset(acc, 0, kron_acc_bytes(p));
   for (int i = 0; i < p->c; i++) { kron_pack(p, a, p->oa, i, A + i * p->hw); kron_pack(p, b, p->ob, i, B + i * p->hw); }
   for (int i = 0; i < p->c; i++) for (int j = 0; j < p->c; j++) {
     kron_sw_mul(A + i * p->hw, B + j * p->hw, p->hw, z); memset(z + 2 * p->hw, 0, 4 * 4); kron_accum(p, z, i, j, acc);
   }
-  kron_prefix(a, p->n, pa); kron_prefix(b, p->n, pb);
+  kron_prefix(p, a, b, pa, pb);
   kron_finish(p, acc, pa, pb, out);
 }
 #endif

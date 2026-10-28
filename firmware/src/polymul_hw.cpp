@@ -22,7 +22,7 @@ static void m_setup() { if (!m_init) { mbedtls_mpi_init(&mx); mbedtls_mpi_init(&
 
 static void mul_mbedtls(const KronPlan* p, const int32_t* a, const int32_t* b, int32_t* out) {
   m_setup();
-  memset(acc, 0, sizeof acc);
+  memset(acc, 0, kron_acc_bytes(p));
   for (int i = 0; i < p->c; i++) { kron_pack(p, a, p->oa, i, A + i * p->hw); kron_pack(p, b, p->ob, i, B + i * p->hw); }
   memset(zbuf[0] + 2 * p->hw, 0, 16);
   for (int i = 0; i < p->c; i++) for (int j = 0; j < p->c; j++) {
@@ -32,7 +32,7 @@ static void mul_mbedtls(const KronPlan* p, const int32_t* a, const int32_t* b, i
     mbedtls_mpi_write_binary_le(&mz, (uint8_t*)zbuf[0], p->hw * 8);
     kron_accum(p, zbuf[0], i, j, acc);
   }
-  kron_prefix(a, p->n, pa); kron_prefix(b, p->n, pb);
+  kron_prefix(p, a, b, pa, pb);
   kron_finish(p, acc, pa, pb, out);
 }
 
@@ -45,7 +45,7 @@ static void l_setup(int hw) {
 }
 static void mul_limb(const KronPlan* p, const int32_t* a, const int32_t* b, int32_t* out) {
   l_setup(p->hw);
-  memset(acc, 0, sizeof acc);
+  memset(acc, 0, kron_acc_bytes(p));
   for (int i = 0; i < p->c; i++) {
     mbedtls_mpi_grow(&ma[i], p->hw); mbedtls_mpi_grow(&mb[i], p->hw);
     memset(ma[i].p, 0, ma[i].n * 4); memset(mb[i].p, 0, mb[i].n * 4); ma[i].s = 1; mb[i].s = 1;
@@ -57,27 +57,27 @@ static void mul_limb(const KronPlan* p, const int32_t* a, const int32_t* b, int3
     mz.p[2 * p->hw] = mz.p[2 * p->hw + 1] = mz.p[2 * p->hw + 2] = 0;
     kron_accum(p, (const uint32_t*)mz.p, i, j, acc);
   }
-  kron_prefix(a, p->n, pa); kron_prefix(b, p->n, pb);
+  kron_prefix(p, a, b, pa, pb);
   kron_finish(p, acc, pa, pb, out);
 }
 
 // ---- S_DRIVER
 static void mul_driver(const KronPlan* p, const int32_t* a, const int32_t* b, int32_t* out) {
   const uint32_t hw = p->hw;
-  memset(acc, 0, sizeof acc); memset(zbuf[0] + 2 * hw, 0, 16);
+  memset(acc, 0, kron_acc_bytes(p)); memset(zbuf[0] + 2 * hw, 0, 16);
   for (int i = 0; i < p->c; i++) { kron_pack(p, a, p->oa, i, A + i * hw); kron_pack(p, b, p->ob, i, B + i * hw); }
   for (int i = 0; i < p->c; i++) for (int j = 0; j < p->c; j++) {
     mpihw::load(A + i * hw, hw, B + j * hw, hw, hw); mpihw::start(hw); mpihw::wait(); mpihw::read_z_fast(zbuf[0], 2 * hw);
     kron_accum(p, zbuf[0], i, j, acc);
   }
-  kron_prefix(a, p->n, pa); kron_prefix(b, p->n, pb);
+  kron_prefix(p, a, b, pa, pb);
   kron_finish(p, acc, pa, pb, out);
 }
 
 void polymul_driver_profiled(const KronPlan* p, const int32_t* a, const int32_t* b, int32_t* out) {
   const uint32_t hw = p->hw; uint32_t t0, t1;
   memset(&g_prof, 0, sizeof g_prof);
-  memset(acc, 0, sizeof acc); memset(zbuf[0] + 2 * hw, 0, 16);
+  memset(acc, 0, kron_acc_bytes(p)); memset(zbuf[0] + 2 * hw, 0, 16);
   t0 = cyc();
   for (int i = 0; i < p->c; i++) { kron_pack(p, a, p->oa, i, A + i * hw); kron_pack(p, b, p->ob, i, B + i * hw); }
   g_prof.pack = cyc() - t0;
@@ -87,14 +87,14 @@ void polymul_driver_profiled(const KronPlan* p, const int32_t* a, const int32_t*
     mpihw::read_z_fast(zbuf[0], 2 * hw); t1 = cyc(); g_prof.read += t1 - t0;
     kron_accum(p, zbuf[0], i, j, acc); g_prof.accum += cyc() - t1;
   }
-  t0 = cyc(); kron_prefix(a, p->n, pa); kron_prefix(b, p->n, pb); g_prof.prefix = cyc() - t0;
+  t0 = cyc(); kron_prefix(p, a, b, pa, pb); g_prof.prefix = cyc() - t0;
   t0 = cyc(); kron_finish(p, acc, pa, pb, out); g_prof.finish = cyc() - t0;
 }
 
 // ---- S_OVERLAP
 static void mul_overlap(const KronPlan* p, const int32_t* a, const int32_t* b, int32_t* out) {
   const uint32_t hw = p->hw; const int c = p->c, T = c * c;
-  memset(acc, 0, sizeof acc); memset(zbuf[0] + 2 * hw, 0, 16); memset(zbuf[1] + 2 * hw, 0, 16);
+  memset(acc, 0, kron_acc_bytes(p)); memset(zbuf[0] + 2 * hw, 0, 16); memset(zbuf[1] + 2 * hw, 0, 16);
   int packed_a = 0, packed_b = 0;                                       // chunks 0 .. packed-1 are built
   auto need = [&](int t) { const int i = t / c, j = t % c;
     while (packed_a <= i) { kron_pack(p, a, p->oa, packed_a, A + packed_a * hw); packed_a++; }
@@ -103,7 +103,7 @@ static void mul_overlap(const KronPlan* p, const int32_t* a, const int32_t* b, i
   need(0); issue(0);
   for (int t = 0; t < T; t++) {
     if (t + 1 < T) need(t + 1);                                         // CPU work while multiply t runs
-    if (t == 0) { kron_prefix(a, p->n, pa); kron_prefix(b, p->n, pb); }
+    if (t == 0) { kron_prefix(p, a, b, pa, pb); }
     if (t > 0) kron_accum(p, zbuf[(t - 1) & 1], (t - 1) / c, (t - 1) % c, acc);
     mpihw::wait(); mpihw::read_z_fast(zbuf[t & 1], 2 * hw);
     if (t + 1 < T) issue(t + 1);

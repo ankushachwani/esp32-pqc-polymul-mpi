@@ -9,6 +9,7 @@ extern "C" {
 
 #define KRON_MAX_CHUNKS 16
 #define KRON_MAX_WORDS 64                         // one operand: 2048 bits (the Z block of the unit holds the 4096-bit product)
+#define KRON_MAX_N 512
 #define KRON_MAX_ACC (2 * 528)                    // 2 * c * m with c * m <= n + c - 1, n <= 512
 #define KRON_ZWORDS (2 * KRON_MAX_WORDS + 4)      // product buffer, tail words stay zero so slot extraction can read past the end
 
@@ -24,19 +25,23 @@ typedef struct {
   int n, c, m, w;                                 // c chunks of m coefficients, w bits per slot
   uint32_t oa, ob;                                // shifts that make the operands non-negative
   uint32_t hw;                                    // operand length in words, padded to a multiple of 16 (512 bits)
+  int narrow;                                     // every intermediate fits in 30 bits: 32-bit accumulators, prefix sums and shift removal (the LX6 has no 64-bit ALU)
 } KronPlan;
 
 // 0 on success, -1 if the operands would not fit in 2048 bits (or c is out of range)
 int kron_plan(const KronCase* cs, int c, KronPlan* p);
 
+// Accumulator and prefix buffers are used as uint32/int32 arrays when p->narrow and as uint64/int64 arrays otherwise; allocate the 64-bit size.
 // chunk-th chunk of v (+off) into out[0..hw)
 void kron_pack(const KronPlan* p, const int32_t* v, uint32_t off, int chunk, uint32_t* out);
+// bytes of accumulator in use (clear them before the first kron_accum)
+uint32_t kron_acc_bytes(const KronPlan* p);
 // add the slots of the product of chunk ci of a and chunk cj of b (z has 2*hw words plus zero tail) into acc
-void kron_accum(const KronPlan* p, const uint32_t* z, int ci, int cj, uint64_t* acc);
-// pre[0] = 0, pre[i+1] = pre[i] + v[i]
-void kron_prefix(const int32_t* v, int n, int64_t* pre);
+void kron_accum(const KronPlan* p, const uint32_t* z, int ci, int cj, void* acc);
+// prefix sums of a and b that kron_finish needs (a's only if the b shift is non-zero and vice versa): pre[0] = 0, pre[i+1] = pre[i] + v[i]
+void kron_prefix(const KronPlan* p, const int32_t* a, const int32_t* b, void* pa, void* pb);
 // remove the shifts, fold x^n = -1, reduce mod q into [0, q)
-void kron_finish(const KronPlan* p, const uint64_t* acc, const int64_t* pa, const int64_t* pb, int32_t* out);
+void kron_finish(const KronPlan* p, const void* acc, const void* pa, const void* pb, int32_t* out);
 
 // O(n^2) reference, result in [0, q)
 void kron_ref_negacyclic(int n, uint32_t q, const int32_t* a, const int32_t* b, int32_t* out);
