@@ -1,0 +1,7 @@
+tag,case,vectors,bad
+CHKCPU,mlkem_x_cbd,152,0
+CHKCPU,mlkem_full,152,0
+CHKCPU,mldsa_c_s,152,0
+CHKCPU,mldsa_c_t0,152,0
+CHKCPU,mldsa_full,152,0
+CHKCPU,falcon512_h_s2,152,0

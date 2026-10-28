@@ -1,0 +1,29 @@
+scheme,op,variant,mean_us,min_us,std_us,vs PQClean,vs NTT copy,us per rejection pass,output identical,reps,cmd
+mlkem768,keygen,PQClean as shipped,9909.0,9887.8,42.5,1.0,1.0,,yes,80,E2E kem keygen ref 80
+mlkem768,enc,PQClean as shipped,11109.5,11102.6,42.0,1.0,1.0,,yes,80,E2E kem enc ref 80
+mlkem768,dec,PQClean as shipped,12714.8,12702.1,55.6,1.0,0.9997012249775918,,yes,80,E2E kem dec ref 80
+mlkem768,dec,"copy of it, NTT",12718.6,12705.8,51.4,1.0002988643156008,1.0,,yes,80,E2E kem dec cpu 80
+mlkem768,dec,"product on MPI, mbedtls API",17536.3,17511.7,72.0,1.3792037625444364,1.3787916909093767,,yes,80,E2E kem dec s0 80 3
+mlkem768,dec,"product on MPI, + limb I/O",14812.2,14783.2,69.2,1.164957372510775,1.1646093123456984,,yes,80,E2E kem dec s1 80 3
+mlkem768,dec,"product on MPI, + direct driver",13875.7,13858.8,56.8,1.0913030484160193,1.0909769943232746,,yes,80,E2E kem dec s2 80 3
+mlkem768,dec,"product on MPI, + overlap",13362.1,13344.0,49.3,1.0509091767074592,1.0505951912946394,,yes,80,E2E kem dec s3 80 3
+mlkem768,indcpa,PQClean as shipped,1426.6,1422.7,4.8,1.0,1.0001402131239483,,yes,320,E2E kem indcpa ref 320
+mlkem768,indcpa,"copy of it, NTT",1426.4,1422.7,4.4,0.9998598065330156,1.0,,yes,320,E2E kem indcpa cpu 320
+mlkem768,indcpa,"product on MPI, mbedtls API",6103.6,6085.6,13.4,4.278424225431095,4.279024116657319,,yes,320,E2E kem indcpa s0 320 3
+mlkem768,indcpa,"product on MPI, + limb I/O",3454.6,3428.0,9.5,2.4215617552222066,2.42190128996074,,yes,320,E2E kem indcpa s1 320 3
+mlkem768,indcpa,"product on MPI, + direct driver",2441.0,2429.1,5.7,1.7110612645450722,1.7113011777902412,,yes,320,E2E kem indcpa s2 320 3
+mlkem768,indcpa,"product on MPI, + overlap",1910.0,1900.7,7.0,1.338847609701388,1.339035333707235,,yes,320,E2E kem indcpa s3 320 3
+mldsa44,verify,PQClean as shipped,22071.8,22066.2,13.6,1.0,1.0,,yes,32,E2E dsa verify ref 32
+mldsa44,sign,PQClean as shipped,39818.2,29869.8,17219.2,1.0,0.9945176670987594,19909.1,yes,32,E2E dsa sign ref 32
+mldsa44,sign,"copy of it, NTT",40037.7,30020.3,17346.9,1.0055125545604773,1.0,20018.85,yes,32,E2E dsa sign cpu 32
+mldsa44,sign,"product on MPI, mbedtls API",51737.4,38866.7,22253.3,1.2993405025842455,1.2922170853970134,25868.7,yes,32,E2E dsa sign s0 32 2 3
+mldsa44,sign,"product on MPI, + limb I/O",43893.2,32647.5,19409.8,1.1023401359177463,1.0962967403222463,21946.6,yes,32,E2E dsa sign s1 32 2 3
+mldsa44,sign,"product on MPI, + direct driver",40460.6,30085.4,17947.2,1.016133325966518,1.0105625448015245,20230.3,yes,32,E2E dsa sign s2 32 2 3
+mldsa44,sign,"product on MPI, + overlap",38762.2,28735.8,17345.8,0.9734794641646283,0.9681425256695564,19381.1,yes,32,E2E dsa sign s3 32 2 3
+falcon512,sign,PQClean as shipped,365923.5,364742.4,1128.1,1.0,1.0,,yes,8,E2E falcon sign ref 8
+falcon512,verify,PQClean as shipped,4937.9,4926.4,52.8,1.0,1.0412897239619576,,yes,128,E2E falcon verify ref 128
+falcon512,verify,"copy of it, NTT",4742.1,4732.6,36.6,0.9603475161505904,1.0,,yes,128,E2E falcon verify cpu 128
+falcon512,verify,"product on MPI, mbedtls API",17678.6,17653.0,40.5,3.5801859089896513,3.7280107969043246,,yes,128,E2E falcon verify s0 128 8
+falcon512,verify,"product on MPI, + limb I/O",11373.2,11353.2,36.2,2.3032463192855266,2.3983467240252208,,yes,128,E2E falcon verify s1 128 8
+falcon512,verify,"product on MPI, + direct driver",8933.7,8905.0,38.1,1.8092103930820798,1.8839121908015437,,yes,128,E2E falcon verify s2 128 8
+falcon512,verify,"product on MPI, + overlap",7190.4,7174.6,24.2,1.4561655764596286,1.5162902511545515,,yes,128,E2E falcon verify s3 128 8
