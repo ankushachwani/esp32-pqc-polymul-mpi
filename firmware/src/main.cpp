@@ -213,7 +213,8 @@ static void cmd_fast(const char* kind, int ci, int c, int opt, int reps) {
   };
   auto same = [&]() { if (single || sum) return !memcmp(out, ref, n * 4); for (int t = 0; t < 4; t++) if (memcmp(out + t * ostride, ref + t * ostride, n * 4)) return false; return true; };
   // bit-exactness: random and extreme operands, fresh fixed operands for each trial
-  int32_t* av[4]; int32_t* bv[4]; int32_t* trial = (int32_t*)pool_alloc(4 * 512 * 4);
+  int32_t* av[4]; int32_t* bv[4]; int32_t* trial = (int32_t*)pool_alloc(4 * n * 4);
+  if (!trial || !fixb || !g_out || !g_vec || !va || !vb) { Serial.println("ERR scratch"); return; }
   for (int t = 0; t < 24; t++) {
     const int mode = t < 12 ? 0 : 1 + (t - 12) % 3, modeb = t < 12 ? 0 : 1 + (t - 12) / 4 % 3;
     for (int u = 0; u < 4; u++) { av[u] = trial + u * n; bv[u] = fixb + u * n; fillvec(av[u], n, k.amin, k.amax, mode); fillvec(bv[u], n, k.bmin, k.bmax, modeb); }
