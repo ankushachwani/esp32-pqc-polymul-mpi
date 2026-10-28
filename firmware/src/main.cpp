@@ -5,7 +5,7 @@
 //   PLAN <case> <c>                         plan for c chunks per operand (slot bits, words per operand, multiplies)
 //   CHECK <case> <c> <stage> <nvec>         bit-exactness of a stage against the O(n^2) reference on random and extreme vectors
 //   CHECKCPU <case> <nvec>                  same for the NTT baseline
-//   BENCH <case> <c> <stage> <reps>         latency of one polynomial product; stage 0..3 = S_MBEDTLS..S_OVERLAP, 4 = NTT full, 5 = NTT with operand a pre-transformed
+//   BENCH <case> <c> <stage> <reps>         latency of one polynomial product; stage 0..3 = S_MBEDTLS..S_OVERLAP, 4 = NTT full, 5 = NTT with operand a pre-transformed, 6/7 = the same with the tuned NTT
 //   PROF <case> <c> <reps>                  where the time goes in S_DRIVER
 //   COMP <case> <reps>                      NTT parts: forward, pointwise, inverse
 //   HWLAT                                   multiplier cost per operand size: mbedtls vs driver, load / compute / read, and sizes beyond 2048 bits through mbedtls
@@ -78,15 +78,19 @@ static void cmd_check(int ci, int c, int stage, int nvec) {
 }
 
 static void cmd_checkcpu(int ci, int nvec) {
-  const KronCase& k = KRON_CASES[ci]; const CpuPoly* cp = cpu_poly_for_case(ci); static int32_t a[512], b[512], ref[512], got[512]; int bad = 0, tot = 0;
-  for (int t = 0; t < nvec + 16; t++) {
-    int ma = 0, mb = 0; if (t >= nvec) { ma = 1 + (t - nvec) % 4; mb = 1 + (t - nvec) / 4 % 4; }
-    fillvec(a, k.n, k.amin, k.amax, ma); fillvec(b, k.n, k.bmin, k.bmax, mb);
-    kron_ref_negacyclic(k.n, k.q, a, b, ref); cp->load(a, b);
-    cp->full(); cp->get(got); if (memcmp(ref, got, k.n * 4)) bad++;
-    cp->pre(); cp->get(got); if (memcmp(ref, got, k.n * 4)) bad++; tot += 2;
+  const KronCase& k = KRON_CASES[ci]; static int32_t a[512], b[512], ref[512], got[512];
+  for (int impl = 0; impl < 2; impl++) {
+    const CpuPoly* cp = impl ? cpu_tuned_for_case(ci) : cpu_poly_for_case(ci); int bad = 0, tot = 0;
+    rs = 0x2545F491 + impl * 0;                                   // same vectors for both implementations
+    for (int t = 0; t < nvec + 16; t++) {
+      int ma = 0, mb = 0; if (t >= nvec) { ma = 1 + (t - nvec) % 4; mb = 1 + (t - nvec) / 4 % 4; }
+      fillvec(a, k.n, k.amin, k.amax, ma); fillvec(b, k.n, k.bmin, k.bmax, mb);
+      kron_ref_negacyclic(k.n, k.q, a, b, ref); cp->load(a, b);
+      cp->full(); cp->get(got); if (memcmp(ref, got, k.n * 4)) bad++;
+      cp->pre(); cp->get(got); if (memcmp(ref, got, k.n * 4)) bad++; tot += 2;
+    }
+    Serial.printf("CHKCPU case=%s impl=%s vectors=%d bad=%d\n", k.name, impl ? "tuned" : "pqclean", tot, bad);
   }
-  Serial.printf("CHKCPU case=%s vectors=%d bad=%d\n", k.name, tot, bad);
 }
 
 struct Stats { double sum = 0, sq = 0, mn = 1e18, mx = 0; int n = 0;
@@ -103,12 +107,15 @@ static void cmd_bench(int ci, int c, int stage, int reps) {
     Serial.printf("R case=%s c=%d stage=%s reps=%d mean_us=%.2f min_us=%.2f max_us=%.2f std_us=%.2f multiplies=%d slot_bits=%d hw_words=%u\n", k.name, c, STAGE_NAME[stage], reps, st.mean(),
                   st.mn, st.mx, st.sd(), p.c * p.c, p.w, (unsigned)p.hw);
   } else {
-    const CpuPoly* cp = cpu_poly_for_case(ci); hw_off();
+    const CpuPoly* cp = stage >= 6 ? cpu_tuned_for_case(ci) : cpu_poly_for_case(ci); hw_off();
+    const bool full = stage == 4 || stage == 6;
+    cp->load(va[0], vb[0]); if (full) cp->full(); else cp->pre();
     for (int r = 0; r < reps; r++) {
       cp->load(va[r & 3], vb[r & 3]);
-      const uint32_t t0 = cyc(); if (stage == 4) cp->full(); else cp->pre(); st.add(cyc() - t0);
+      const uint32_t t0 = cyc(); if (full) cp->full(); else cp->pre(); st.add(cyc() - t0);
     }
-    Serial.printf("R case=%s c=0 stage=%s reps=%d mean_us=%.2f min_us=%.2f max_us=%.2f std_us=%.2f multiplies=0 slot_bits=0 hw_words=0\n", k.name, stage == 4 ? "ntt_full" : "ntt_pre", reps,
+    const char* nm = stage == 4 ? "ntt_full" : stage == 5 ? "ntt_pre" : stage == 6 ? "tuned_full" : "tuned_pre";
+    Serial.printf("R case=%s c=0 stage=%s reps=%d mean_us=%.2f min_us=%.2f max_us=%.2f std_us=%.2f multiplies=0 slot_bits=0 hw_words=0\n", k.name, nm, reps,
                   st.mean(), st.mn, st.mx, st.sd());
   }
 }
@@ -140,6 +147,17 @@ static void cmd_comp(int ci, int reps) {
   }
   const double f = 1.0 / MHZ / reps;
   Serial.printf("C case=%s reps=%d ntt_us=%.2f pointwise_us=%.2f intt_us=%.2f full_us=%.2f pre_us=%.2f\n", k.name, reps, tn * f, tp * f, ti * f, tf * f, tq * f);
+  const CpuPoly* ct = cpu_tuned_for_case(ci); ct->load(va[0], vb[0]); ct->full(); ct->pre(); ct->ntt(); ct->pointwise(); ct->intt();
+  tn = tp = ti = tf = tq = 0;
+  for (int r = 0; r < reps; r++) {
+    ct->load(va[r & 3], vb[r & 3]);
+    uint32_t t0 = cyc(); ct->ntt(); tn += cyc() - t0;
+    t0 = cyc(); ct->pointwise(); tp += cyc() - t0;
+    t0 = cyc(); ct->intt(); ti += cyc() - t0;
+    t0 = cyc(); ct->full(); tf += cyc() - t0;
+    t0 = cyc(); ct->pre(); tq += cyc() - t0;
+  }
+  Serial.printf("CT case=%s reps=%d ntt_us=%.2f pointwise_us=%.2f intt_us=%.2f full_us=%.2f pre_us=%.2f\n", k.name, reps, tn * f, tp * f, ti * f, tf * f, tq * f);
 }
 
 static uint32_t sw_a[96], sw_b[96], sw_ref[200], sw_z[200];

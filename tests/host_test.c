@@ -49,6 +49,27 @@ static void test_polymul(void) {
   }
 }
 
+static void test_sum(void) {
+  static int32_t a[4][512], b[4][512], ref[512], acc[512], tmp[512], got[512]; const int32_t *pa[4], *pb[4];
+  int checked = 0;
+  for (int ci = 0; ci < N_CASES; ci++) {
+    const KronCase* cs = &KRON_CASES[ci];
+    for (int terms = 2; terms <= 4; terms++) for (int c = 1; c <= 8; c++) {
+      KronPlan p; if (kron_plan_terms(cs, c, terms, &p)) continue;
+      for (int t = 0; t < 12; t++) {
+        const int mode = t < 8 ? 0 : 1 + (t - 8) % 3;
+        for (int k = 0; k < terms; k++) { fillvec(a[k], cs->n, cs->amin, cs->amax, mode); fillvec(b[k], cs->n, cs->bmin, cs->bmax, mode == 1 ? 2 : mode == 2 ? 1 : mode); pa[k] = a[k]; pb[k] = b[k]; }
+        memset(acc, 0, sizeof acc);
+        for (int k = 0; k < terms; k++) { kron_ref_negacyclic(cs->n, cs->q, a[k], b[k], tmp); for (int i = 0; i < cs->n; i++) acc[i] = (acc[i] + tmp[i]) % cs->q; }
+        memcpy(ref, acc, sizeof ref);
+        kron_mul_sw_sum(&p, pa, pb, got); checked++;
+        CHECK(!memcmp(ref, got, cs->n * 4), "sum of %d products, %s c=%d mode %d differs", terms, cs->name, c, mode);
+      }
+    }
+  }
+  printf("fused sums of 2..4 products agree with the reference in %d checks\n", checked);
+}
+
 static void test_kem(void) {
   static uint8_t pk[KEM_PK], sk[KEM_SK], ct[KEM_CT], ss1[32], ss2[32], ss3[32], ss4[32], m1[32], m2[32], m3[32];
   static int32_t s_std[3 * 256];
@@ -106,7 +127,7 @@ static void test_falcon(void) {
 }
 
 int main(void) {
-  test_polymul(); test_kem(); test_dsa(); test_falcon();
+  test_polymul(); test_sum(); test_kem(); test_dsa(); test_falcon();
   printf(fails ? "%d FAILURES\n" : "all host tests passed\n", fails);
   return fails != 0;
 }

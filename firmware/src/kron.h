@@ -25,11 +25,14 @@ typedef struct {
   int n, c, m, w;                                 // c chunks of m coefficients, w bits per slot
   uint32_t oa, ob;                                // shifts that make the operands non-negative
   uint32_t hw;                                    // operand length in words, padded to a multiple of 16 (512 bits)
+  int terms;                                      // number of products summed inside the multiplies (1 for a single product)
   int narrow;                                     // every intermediate fits in 30 bits: 32-bit accumulators, prefix sums and shift removal (the LX6 has no 64-bit ALU)
 } KronPlan;
 
 // 0 on success, -1 if the operands would not fit in 2048 bits (or c is out of range)
 int kron_plan(const KronCase* cs, int c, KronPlan* p);
+// plan for the sum of `terms` products a_t*b_t whose chunk products are added before the slots are unpacked (slots get log2(terms) more bits)
+int kron_plan_terms(const KronCase* cs, int c, int terms, KronPlan* p);
 
 // Accumulator and prefix buffers are used as uint32/int32 arrays when p->narrow and as uint64/int64 arrays otherwise; allocate the 64-bit size.
 // chunk-th chunk of v (+off) into out[0..hw)
@@ -52,6 +55,11 @@ void kron_sw_mul(const uint32_t* x, const uint32_t* y, uint32_t hw, uint32_t* z)
 typedef void (*kron_mul_fn)(const KronPlan* p, const int32_t* a, const int32_t* b, int32_t* out);
 // reference implementation of the whole pipeline on top of kron_sw_mul (host tests)
 void kron_mul_sw(const KronPlan* p, const int32_t* a, const int32_t* b, int32_t* out);
+
+// sum of p->terms products: the chunk products are added as integers before one unpacking (host reference for the fused path)
+void kron_mul_sw_sum(const KronPlan* p, const int32_t* const* a, const int32_t* const* b, int32_t* out);
+// out[i] = sum over t of v[t][i], for the prefix sums of a summed vector
+void kron_sumvec(const int32_t* const* v, int k, int n, int32_t* out);
 
 #ifdef __cplusplus
 }
