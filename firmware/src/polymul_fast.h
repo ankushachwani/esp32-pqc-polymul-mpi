@@ -7,7 +7,8 @@ enum {
   OPT_XRES = 2,       // X stays in the unit's X block across products that share it (only Y and the cleared Z are stored)
   OPT_FUSE = 4,       // a sum of products is added as integers before one unpacking / unshifting (plan with terms > 1)
   OPT_SHARE = 8,      // products with a common operand: it is packed once and stays loaded
-  OPT_ALL = 15
+  OPT_FASTCPU = 16,   // unrolled pack / unpack and the one-pass unshift, fold and reduce (kron_fast.cpp)
+  OPT_ALL = 31
 };
 struct Packed { uint32_t* words; void* pre; };            // a fixed operand packed for one plan: c chunks of hw words, prefix sums (if the plan needs them)
 Packed* packed_new(const KronPlan* p, const int32_t* b);

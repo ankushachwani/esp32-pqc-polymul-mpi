@@ -4,6 +4,7 @@
 #include "mpi_hw.h"
 #include "polymul_fast.h"
 #include "polymul_hw.h"
+#include "kron_fast.h"
 
 #define FA g_A            // chunk buffers, index = term * c + chunk
 #define FB g_B
@@ -31,7 +32,7 @@ void* prefix_sum_new(const KronPlan* p, const int32_t* const* b, int terms) {
 
 void fast_mul(const KronPlan* p, const int32_t* const* a, const int32_t* const* b, const Packed* const* fb, const void* pre_b, int32_t* out, uint32_t opt) {
   const uint32_t hw = p->hw; const int c = p->c, T = p->terms, S = c * T * c;
-  const bool pre = opt & OPT_PREPACK, xres = opt & OPT_XRES;
+  const bool pre = opt & OPT_PREPACK, xres = opt & OPT_XRES, fc = opt & OPT_FASTCPU;
   if (T > 1 && c > 4) return;                                          // zacc holds four partial products
   memset(facc, 0, kron_acc_bytes(p)); memset(zbuf + 2 * hw, 0, 16);
   for (int j = 0; j < c; j++) memset(zacc[j & 3] + 2 * hw, 0, 16);
@@ -39,8 +40,8 @@ void fast_mul(const KronPlan* p, const int32_t* const* a, const int32_t* const* 
   auto bptr = [&](int t, int j) -> const uint32_t* { return (pre && fb && fb[t]) ? fb[t]->words + j * hw : FB + (t * c + j) * hw; };
   auto need = [&](int s) {
     const int i = s / (T * c), r = s % (T * c), t = r / c, j = r % c;
-    while (cntA[t] <= i) { kron_pack(p, a[t], p->oa, cntA[t], FA + (t * c + cntA[t]) * hw); cntA[t]++; }
-    if (!(pre && fb && fb[t])) while (cntB[t] <= j) { kron_pack(p, b[t], p->ob, cntB[t], FB + (t * c + cntB[t]) * hw); cntB[t]++; }
+    while (cntA[t] <= i) { (fc ? kron_pack_fast : kron_pack)(p, a[t], p->oa, cntA[t], FA + (t * c + cntA[t]) * hw); cntA[t]++; }
+    if (!(pre && fb && fb[t])) while (cntB[t] <= j) { (fc ? kron_pack_fast : kron_pack)(p, b[t], p->ob, cntB[t], FB + (t * c + cntB[t]) * hw); cntB[t]++; }
   };
   int lastX = -1;
   auto issue = [&](int s) {
@@ -63,14 +64,14 @@ void fast_mul(const KronPlan* p, const int32_t* const* a, const int32_t* const* 
     mpihw::wait();
     if (t == 0) mpihw::read_z_fast(z, 2 * hw); else mpihw::read_z_add(z, 2 * hw);
     if (s + 1 < S) issue(s + 1);
-    if (t == T - 1) kron_accum(p, z, i, j, facc);
+    if (t == T - 1) (fc ? kron_accum_fast : kron_accum)(p, z, i, j, facc);
   }
-  kron_finish(p, facc, fpa, pbp, out);
+  (fc ? kron_finish_fast : kron_finish)(p, facc, fpa, pbp, out);
 }
 
 void fast_mul_shared(const KronPlan* p, const int32_t* a, int nb, const int32_t* const* b, const Packed* const* fb, int32_t* const* out, uint32_t opt) {
   const uint32_t hw = p->hw; const int c = p->c, S = c * nb * c; const uint32_t accw = 2 * c * p->m;
-  const bool pre = opt & OPT_PREPACK, xres = opt & OPT_XRES;
+  const bool pre = opt & OPT_PREPACK, xres = opt & OPT_XRES, fc = opt & OPT_FASTCPU;
   if (!(opt & OPT_SHARE) || !p->narrow || nb > 4 || accw * 4 * nb > KRON_MAX_ACC * 8) {                       // fall back to separate products
     const int32_t* aa[1] = {a};
     for (int t = 0; t < nb; t++) { const int32_t* bb[1] = {b[t]}; const Packed* ff[1] = {fb ? fb[t] : nullptr}; fast_mul(p, aa, bb, ff, nullptr, out[t], opt); }
@@ -81,8 +82,8 @@ void fast_mul_shared(const KronPlan* p, const int32_t* a, int nb, const int32_t*
   auto bptr = [&](int t, int j) -> const uint32_t* { return (pre && fb && fb[t]) ? fb[t]->words + j * hw : FB + (t * c + j) * hw; };
   auto need = [&](int s) {
     const int i = s / (nb * c), r = s % (nb * c), t = r / c, j = r % c;
-    while (cntA <= i) { kron_pack(p, a, p->oa, cntA, FA + cntA * hw); cntA++; }
-    if (!(pre && fb && fb[t])) while (cntB[t] <= j) { kron_pack(p, b[t], p->ob, cntB[t], FB + (t * c + cntB[t]) * hw); cntB[t]++; }
+    while (cntA <= i) { (fc ? kron_pack_fast : kron_pack)(p, a, p->oa, cntA, FA + cntA * hw); cntA++; }
+    if (!(pre && fb && fb[t])) while (cntB[t] <= j) { (fc ? kron_pack_fast : kron_pack)(p, b[t], p->ob, cntB[t], FB + (t * c + cntB[t]) * hw); cntB[t]++; }
   };
   int lastX = -1;
   auto issue = [&](int s) {
@@ -101,10 +102,10 @@ void fast_mul_shared(const KronPlan* p, const int32_t* a, int nb, const int32_t*
     const int i = s / (nb * c), r = s % (nb * c), t = r / c, j = r % c;
     mpihw::wait(); mpihw::read_z_fast(zbuf, 2 * hw);
     if (s + 1 < S) issue(s + 1);
-    kron_accum(p, zbuf, i, j, (uint32_t*)facc + t * accw);
+    (fc ? kron_accum_fast : kron_accum)(p, zbuf, i, j, (uint32_t*)facc + t * accw);
     if (i == c - 1 && j == c - 1) {                                     // polynomial t complete: finish it while the unit works on the next one
-      if (p->oa && !pbp[t]) { static int32_t pbt[KRON_MAX_N + 1]; kron_prefix1(p, b[t], pbt); kron_finish(p, (uint32_t*)facc + t * accw, fpa, pbt, out[t]); }
-      else kron_finish(p, (uint32_t*)facc + t * accw, fpa, pbp[t], out[t]);
+      if (p->oa && !pbp[t]) { static int32_t pbt[KRON_MAX_N + 1]; kron_prefix1(p, b[t], pbt); (fc ? kron_finish_fast : kron_finish)(p, (uint32_t*)facc + t * accw, fpa, pbt, out[t]); }
+      else (fc ? kron_finish_fast : kron_finish)(p, (uint32_t*)facc + t * accw, fpa, pbp[t], out[t]);
     }
   }
 }
