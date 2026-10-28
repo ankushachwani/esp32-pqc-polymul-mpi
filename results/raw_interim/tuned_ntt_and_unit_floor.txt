@@ -1,0 +1,21 @@
+CHKCPU case=mlkem_x_cbd impl=pqclean vectors=72 bad=0
+CHKCPU case=mlkem_x_cbd impl=tuned vectors=72 bad=0
+R case=mlkem_x_cbd c=0 stage=ntt_full reps=200 mean_us=871.80 min_us=864.76 max_us=873.26 std_us=2.66 multiplies=0 slot_bits=0 hw_words=0
+R case=mlkem_x_cbd c=0 stage=ntt_pre reps=200 mean_us=663.90 min_us=658.63 max_us=666.81 std_us=3.82 multiplies=0 slot_bits=0 hw_words=0
+R case=mlkem_x_cbd c=0 stage=tuned_full reps=200 mean_us=302.93 min_us=301.00 max_us=328.35 std_us=3.50 multiplies=0 slot_bits=0 hw_words=0
+R case=mlkem_x_cbd c=0 stage=tuned_pre reps=200 mean_us=230.55 min_us=228.37 max_us=237.75 std_us=3.35 multiplies=0 slot_bits=0 hw_words=0
+CHKCPU case=mldsa_c_s impl=pqclean vectors=72 bad=0
+CHKCPU case=mldsa_c_s impl=tuned vectors=72 bad=0
+R case=mldsa_c_s c=0 stage=ntt_full reps=200 mean_us=738.21 min_us=732.35 max_us=741.84 std_us=3.57 multiplies=0 slot_bits=0 hw_words=0
+R case=mldsa_c_s c=0 stage=ntt_pre reps=200 mean_us=525.55 min_us=521.21 max_us=530.33 std_us=4.01 multiplies=0 slot_bits=0 hw_words=0
+R case=mldsa_c_s c=0 stage=tuned_full reps=200 mean_us=376.44 min_us=372.80 max_us=382.43 std_us=4.03 multiplies=0 slot_bits=0 hw_words=0
+R case=mldsa_c_s c=0 stage=tuned_pre reps=200 mean_us=285.32 min_us=282.51 max_us=291.92 std_us=3.73 multiplies=0 slot_bits=0 hw_words=0
+CHKCPU case=falcon512_h_s2 impl=pqclean vectors=72 bad=0
+CHKCPU case=falcon512_h_s2 impl=tuned vectors=72 bad=0
+R case=falcon512_h_s2 c=0 stage=ntt_full reps=200 mean_us=1304.35 min_us=1301.95 max_us=1310.29 std_us=3.48 multiplies=0 slot_bits=0 hw_words=0
+R case=falcon512_h_s2 c=0 stage=ntt_pre reps=200 mean_us=987.11 min_us=979.52 max_us=987.83 std_us=0.94 multiplies=0 slot_bits=0 hw_words=0
+R case=falcon512_h_s2 c=0 stage=tuned_full reps=200 mean_us=777.00 min_us=769.75 max_us=779.82 std_us=3.17 multiplies=0 slot_bits=0 hw_words=0
+R case=falcon512_h_s2 c=0 stage=tuned_pre reps=200 mean_us=578.13 min_us=572.72 max_us=599.34 std_us=4.31 multiplies=0 slot_bits=0 hw_words=0
+R case=mlkem_x_cbd c=3 stage=overlap reps=100 mean_us=562.02 min_us=559.25 max_us=569.38 std_us=3.43 multiplies=9 slot_bits=21 hw_words=64
+W case=mlkem_x_cbd c=3 xres=0 reps=100 mean_us=407.60 min_us=406.73 max_us=425.15 multiplies=9
+W case=mlkem_x_cbd c=3 xres=1 reps=100 mean_us=392.82 min_us=392.09 max_us=399.69 multiplies=9
