@@ -29,17 +29,22 @@ def fig_latency():
 
 
 def fig_ablation():
-    a = pd.read_csv(os.path.join(T, 'ablation.csv')); a = a[a.opt >= 0]
-    groups = [('one product', 'mlkem_x_cbd'), ('one product', 'mldsa_c_s'), ('one product', 'mldsa_c_t0'), ('one product', 'mldsa_full'),
-              ('sum of 3 products (ML-KEM decrypt shape)', 'mlkem_x_cbd'), ('4 products, common operand', 'mldsa_c_s'), ('4 products, common operand', 'mldsa_c_t0')]
-    fig, axes = plt.subplots(1, len(groups), figsize=(11.5, 3.2))
+    a = pd.read_csv(os.path.join(T, 'ablation.csv')); a = a[(a.opt >= 0) & ~a.switches.str.contains('no Z clear')]
+    ab = {'prepack': 'P', 'X resident': 'X', 'fuse sum': 'F', 'share operand': 'S', 'fast CPU code': 'C'}
+    def short(sw):
+        if sw == 'none': return 'none'
+        for k, v in ab.items(): sw = sw.replace(k, v)
+        return sw.replace(' + ', '+')
+    groups = [('one product', 'mlkem_x_cbd'), ('one product', 'mldsa_c_s'), ('one product', 'mldsa_c_t0'), ('sum of 3 products (ML-KEM decrypt shape)', 'mlkem_x_cbd'), ('4 products, common operand', 'mldsa_c_s')]
+    ttl = {'one product': 'one product', 'sum of 3 products (ML-KEM decrypt shape)': 'sum of 3', '4 products, common operand': '4 products, shared c'}
+    fig, axes = plt.subplots(1, len(groups), figsize=(12.5, 3.4))
     for ax, (kind, case) in zip(axes, groups):
-        g = a[(a.kind == kind) & (a.case == case)].sort_values('opt'); base = g[g.opt == 0]['mean (us)'].iloc[0]
+        g = a[(a.kind == kind) & (a.case == case)].sort_values('opt')
         ax.barh(np.arange(len(g)), g['mean (us)'], color=['#999999'] + [C_STAGE[3]] * (len(g) - 1))
-        ax.set_yticks(np.arange(len(g))); ax.set_yticklabels([s.replace(' + ', '+') for s in g.switches], fontsize=6); ax.invert_yaxis()
-        ax.set_title('%s\n%s' % (case, {'one product': 'one product', 'sum of 3 products (ML-KEM decrypt shape)': 'sum of 3', '4 products, common operand': '4 products, shared c'}[kind]), fontsize=7.5, loc='left'); ax.tick_params(labelsize=6.5)
-        ax.set_xlabel('us', fontsize=7)
-    fig.suptitle('Switches of the optimised path, alone and combined (grey = none)', fontsize=9, x=0.01, ha='left'); fig.tight_layout(); fig.savefig(os.path.join(F, 'ablation.png')); plt.close(fig)
+        ax.set_yticks(np.arange(len(g))); ax.set_yticklabels([short(x) for x in g.switches], fontsize=7); ax.invert_yaxis()
+        ax.set_title('%s\n%s' % (case, ttl[kind]), fontsize=8, loc='left'); ax.tick_params(labelsize=7); ax.set_xlabel('us', fontsize=7)
+    fig.suptitle('Switches of the optimised path (P prepack, X X resident, F fuse sum, S share operand, C fast CPU code); grey = none', fontsize=9, x=0.01, ha='left')
+    fig.tight_layout(rect=(0, 0, 1, 0.93)); fig.savefig(os.path.join(F, 'ablation.png')); plt.close(fig)
 
 
 def fig_breakdown():
@@ -57,10 +62,10 @@ def fig_breakdown():
 
 def fig_e2e():
     e = pd.read_csv(os.path.join(T, 'e2e.csv')); keep = [('mlkem768', 'indcpa'), ('mlkem768', 'dec'), ('mldsa44', 'sign'), ('falcon512', 'verify')]
-    ids = [('ref', 'PQClean', C_NTT), ('t', 'tuned NTT', '#1b6ca8'), ('tc', 'tuned NTT,\nkey cached', '#7fb3d9'), ('s0', 'MPI mbedtls\nAPI', C_STAGE[0]), ('s3', 'MPI overlap\nstage', C_STAGE[2]), ('f31', 'MPI\noptimised', C_STAGE[3])]
+    ids = [('ref', 'PQClean', C_NTT), ('t', 'tuned NTT', '#1b6ca8'), ('tc', 'tuned NTT,\nkey cached', '#7fb3d9'), ('s0', 'MPI mbedtls\nAPI', C_STAGE[0]), ('s3', 'MPI overlap\nstage', C_STAGE[2]), ('opt', 'MPI\noptimised', C_STAGE[3])]
     fig, axes = plt.subplots(1, 4, figsize=(11.0, 3.2))
     for ax, (sch, op) in zip(axes, keep):
-        g = e[(e.scheme == sch) & (e.op == op)].set_index('variant_id'); sel = [(k, l, c) for k, l, c in ids if k in g.index]
+        g = e[(e.scheme == sch) & (e.op == op)].set_index('variant_id'); g = g.rename(index={'f19': 'opt'}) if 'f19' in g.index else g.rename(index={'f31': 'opt'}); sel = [(k, l, c) for k, l, c in ids if k in g.index]
         ax.bar(np.arange(len(sel)), [g.loc[k, 'mean_us'] / 1000.0 for k, _, _ in sel], color=[c for _, _, c in sel])
         ax.set_xticks(np.arange(len(sel))); ax.set_xticklabels([l for _, l, _ in sel], rotation=40, ha='right', fontsize=6.5); ax.set_title('%s %s' % (sch, 'decrypt step' if op == 'indcpa' else op), fontsize=8.5, loc='left'); ax.set_ylabel('ms')
     fig.suptitle('Whole-scheme operations with the product swapped (outputs identical to PQClean)', fontsize=9, x=0.01, ha='left')

@@ -12,7 +12,7 @@ CASE_NOTE = {
     'mldsa_c_t0': 'ML-DSA-44, c x t0', 'mldsa_full': 'ML-DSA-44, y x A (full width)', 'falcon512_s2_h': 'Falcon-512 verify, s2 x h'}
 SWITCH = {1: 'prepack', 2: 'X resident', 4: 'fuse sum', 8: 'share operand', 16: 'fast CPU code', 32: 'no Z clear'}
 VARIANT = {'ref': 'PQClean as shipped', 'cpu': 'copy of it, PQClean NTT', 't': 'tuned NTT', 'tc': 'tuned NTT, key transform cached',
-           's0': 'MPI: mbedtls API', 's1': 'MPI: + limb I/O', 's2': 'MPI: + direct driver', 's3': 'MPI: + overlap', 'f0': 'MPI engine, no switch', 'f31': 'MPI optimised (all switches)'}
+           's0': 'MPI: mbedtls API', 's1': 'MPI: + limb I/O', 's2': 'MPI: + direct driver', 's3': 'MPI: + overlap', 'f0': 'MPI engine, no switch', 'f31': 'MPI optimised (all switches)', 'f19': 'MPI optimised (all but the fused sum)'}
 
 
 def rd(name): return pd.read_csv(os.path.join(RAW, name + '.csv'))
@@ -81,6 +81,17 @@ def main():
                              'mean (us)': old.loc[case].mean_us, 'x vs no switch': base / old.loc[case].mean_us, 'checks': '', 'mismatches': ''})
     at = pd.DataFrame(out_rows); at.to_csv(os.path.join(OUT, 'ablation.csv'), index=False); md(at.drop(columns=['opt']), os.path.join(OUT, 'ablation.md'))
 
+    # compact view: each switch alone, and the fastest combination that passed the exactness checks
+    rows = []
+    for (kind, case), g in at[(at.opt >= 0)].groupby(['kind', 'case'], sort=False):
+        g = g[g.mismatches == 0]; alone = {r.opt: r['mean (us)'] for _, r in g.iterrows()}
+        bestr = g.loc[g['mean (us)'].idxmin()]
+        row = {'kind': kind, 'case': case, 'none (us)': alone[0]}
+        for bit, nm in ((1, 'prepack'), (2, 'X resident'), (4, 'fuse sum'), (8, 'share operand'), (16, 'fast CPU code')): row['%s alone (us)' % nm] = alone.get(bit, float('nan'))
+        row['fastest combination'] = bestr.switches; row['fastest (us)'] = bestr['mean (us)']; row['none / fastest'] = alone[0] / bestr['mean (us)']
+        rows.append(row)
+    asum = pd.DataFrame(rows); asum.to_csv(os.path.join(OUT, 'ablation_summary.csv'), index=False); md(asum, os.path.join(OUT, 'ablation_summary.md'))
+
     # --- the unit's own floor for the plan, against the optimised path
     hw = rd('hwonly'); rows = []
     for case in CASE_NOTE:
@@ -102,7 +113,9 @@ def main():
     hwl.to_csv(os.path.join(OUT, 'multiplier.csv'), index=False); md(hwl.astype(object).where(hwl != -1, 'n/a'), os.path.join(OUT, 'multiplier.md'))
 
     # --- whole schemes
-    e = rd('e2e'); rows = []
+    e = rd('e2e')
+    if os.path.exists(os.path.join(RAW, 'e2e_extra.csv')): e = pd.concat([e, rd('e2e_extra')], ignore_index=True)       # ML-KEM with the switch set that leaves the fused sum off
+    rows = []
     for (scheme, op), g in e.groupby(['scheme', 'op'], sort=False):
         ref = g[g.variant == 'ref'].iloc[0].mean_us
         base = g[g.variant == 'cpu'].iloc[0].mean_us if (g.variant == 'cpu').any() else ref
@@ -121,7 +134,7 @@ def main():
         if len(g) == 1: continue
         t = {r['variant_id']: r['mean_us'] / 1000.0 for _, r in g.iterrows()}
         nm = {'mlkem768 dec': 'ML-KEM-768 decapsulation', 'mlkem768 indcpa': 'ML-KEM-768 decrypt step', 'mldsa44 sign': 'ML-DSA-44 signing', 'falcon512 verify': 'Falcon-512 verification'}['%s %s' % (scheme, op)]
-        opt = t['f31']
+        opt = t['f19'] if 'f19' in t else t['f31']
         comp_rows.append({'operation': nm, 'PQClean (ms)': t['ref'], 'PQClean NTT copy (ms)': t['cpu'], 'tuned NTT (ms)': t['t'], 'tuned NTT, key cached (ms)': t.get('tc', float('nan')),
                           'MPI mbedtls API (ms)': t['s0'], 'MPI overlap stage (ms)': t['s3'], 'MPI optimised (ms)': opt, 'mbedtls API / optimised': t['s0'] / opt,
                           'optimised / NTT copy': opt / t['cpu'], 'optimised / tuned NTT': opt / t['t'], 'optimised / tuned, key cached': opt / t['tc'] if 'tc' in t else float('nan'),
@@ -135,7 +148,7 @@ def main():
         d = {r['variant_id']: r for _, r in g.iterrows()}
         for base_id in ('cpu', 't', 'tc'):
             if base_id not in d: continue
-            b = d[base_id]; o = d['f31']
+            b = d[base_id]; o = d['f19'] if 'f19' in d else d['f31']
             share = b['product steps (us)'] / b['mean_us']; S = b['product steps (us)'] / o['product steps (us)']
             rows.append({'operation': '%s %s' % (scheme, op), 'baseline': VARIANT[base_id], 'baseline total (ms)': b['mean_us'] / 1000.0, 'share of time in the product steps': share,
                          'product steps: optimised MPI speedup (x)': S, 'bound if the products cost nothing (x)': 1 / (1 - share), 'bound at the measured product speedup (x)': 1 / ((1 - share) + share / S),

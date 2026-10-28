@@ -1,0 +1,97 @@
+kind,case,chunks,switches,opt,mean (us),x vs no switch,checks,mismatches
+one product,mlkem_x_cbd,3,none,0,529.32,1.0,24,0
+one product,mlkem_x_cbd,3,prepack,1,519.71,1.0184910815647188,24,0
+one product,mlkem_x_cbd,3,X resident,2,512.74,1.0323360767640521,24,0
+one product,mlkem_x_cbd,3,fast CPU code,16,460.14,1.1503455470074326,24,0
+one product,mlkem_x_cbd,3,no Z clear,32,518.55,1.0207694532831937,24,18
+one product,mlkem_x_cbd,3,prepack + X resident,3,502.97,1.052388810465833,24,0
+one product,mlkem_x_cbd,3,prepack + fast CPU code,17,453.8,1.1664169237549582,24,0
+one product,mlkem_x_cbd,3,X resident + fast CPU code,18,443.05,1.194718429071211,24,0
+one product,mlkem_x_cbd,3,prepack + X resident + fast CPU code,19,438.82,1.2062349026935875,24,0
+one product,mlkem_x_cbd,3,prepack + X resident + fast CPU code + no Z clear,51,427.21,1.2390159406380938,24,18
+one product,mlkem_x_cbd,3,for reference: old overlap stage (no engine),-1,561.56,0.9425885034546622,,
+one product,mlkem_full,4,none,0,950.37,1.0,24,0
+one product,mlkem_full,4,prepack,1,941.82,1.0090781678027647,24,0
+one product,mlkem_full,4,X resident,2,916.93,1.0364695233005792,24,0
+one product,mlkem_full,4,fast CPU code,16,951.99,0.9982983014527463,24,0
+one product,mlkem_full,4,no Z clear,32,948.13,1.0023625452205922,24,18
+one product,mlkem_full,4,prepack + X resident,3,909.02,1.0454885481067524,24,0
+one product,mlkem_full,4,prepack + fast CPU code,17,943.4,1.0073881704473182,24,0
+one product,mlkem_full,4,X resident + fast CPU code,18,918.96,1.034179942543745,24,0
+one product,mlkem_full,4,prepack + X resident + fast CPU code,19,910.63,1.0436401172814425,24,0
+one product,mlkem_full,4,prepack + X resident + fast CPU code + no Z clear,51,909.69,1.0447185304884081,24,18
+one product,mlkem_full,4,for reference: old overlap stage (no engine),-1,1008.99,0.9419022983379419,,
+one product,mldsa_c_s,3,none,0,366.31,1.0,24,0
+one product,mldsa_c_s,3,prepack,1,333.83,1.0972950304046971,24,0
+one product,mldsa_c_s,3,X resident,2,358.01,1.023183709952236,24,0
+one product,mldsa_c_s,3,fast CPU code,16,219.63,1.6678504758002095,24,0
+one product,mldsa_c_s,3,no Z clear,32,360.77,1.0153560440169638,24,18
+one product,mldsa_c_s,3,prepack + X resident,3,325.58,1.1250998218563795,24,0
+one product,mldsa_c_s,3,prepack + fast CPU code,17,201.34,1.8193602860832423,24,0
+one product,mldsa_c_s,3,X resident + fast CPU code,18,211.3,1.7336015144344532,24,0
+one product,mldsa_c_s,3,prepack + X resident + fast CPU code,19,193.18,1.8962107878662386,24,0
+one product,mldsa_c_s,3,prepack + X resident + fast CPU code + no Z clear,51,186.04,1.968985164480757,24,18
+one product,mldsa_c_s,3,for reference: old overlap stage (no engine),-1,385.05,0.9513309959745487,,
+one product,mldsa_c_t0,3,none,0,534.99,1.0,24,0
+one product,mldsa_c_t0,3,prepack,1,525.36,1.0183302878026497,24,0
+one product,mldsa_c_t0,3,X resident,2,517.75,1.0332979237083535,24,0
+one product,mldsa_c_t0,3,fast CPU code,16,472.06,1.1333093250857942,24,0
+one product,mldsa_c_t0,3,no Z clear,32,522.09,1.0247083836120208,24,18
+one product,mldsa_c_t0,3,prepack + X resident,3,508.61,1.0518668527948722,24,0
+one product,mldsa_c_t0,3,prepack + fast CPU code,17,466.47,1.1468904752717215,24,0
+one product,mldsa_c_t0,3,X resident + fast CPU code,18,455.3,1.1750274544256534,24,0
+one product,mldsa_c_t0,3,prepack + X resident + fast CPU code,19,450.42,1.1877580924470494,24,0
+one product,mldsa_c_t0,3,prepack + X resident + fast CPU code + no Z clear,51,435.88,1.2273790951638066,24,18
+one product,mldsa_c_t0,3,for reference: old overlap stage (no engine),-1,567.37,0.9429296578952007,,
+one product,mldsa_full,6,none,0,1995.81,1.0,24,0
+one product,mldsa_full,6,prepack,1,1994.2,1.0008073412897402,24,0
+one product,mldsa_full,6,X resident,2,1908.94,1.0455069305478433,24,0
+one product,mldsa_full,6,fast CPU code,16,1995.77,1.0000200423896541,24,0
+one product,mldsa_full,6,no Z clear,32,1938.93,1.0293357676656711,24,18
+one product,mldsa_full,6,prepack + X resident,3,1908.73,1.04562195805588,24,0
+one product,mldsa_full,6,prepack + fast CPU code,17,1995.79,1.0000100210944036,24,0
+one product,mldsa_full,6,X resident + fast CPU code,18,1908.83,1.0455671798955382,24,0
+one product,mldsa_full,6,prepack + X resident + fast CPU code,19,1908.9,1.0455288385981454,24,0
+one product,mldsa_full,6,prepack + X resident + fast CPU code + no Z clear,51,1853.01,1.0770638042967928,24,18
+one product,mldsa_full,6,for reference: old overlap stage (no engine),-1,2136.1,0.9343242357567529,,
+one product,falcon512_s2_h,8,none,0,3403.91,1.0,24,0
+one product,falcon512_s2_h,8,prepack,1,3385.48,1.0054438366199179,24,0
+one product,falcon512_s2_h,8,X resident,2,3245.95,1.0486637194041806,24,0
+one product,falcon512_s2_h,8,fast CPU code,16,3404.91,0.9997063064809348,24,0
+one product,falcon512_s2_h,8,no Z clear,32,3461.99,0.9832235217317208,24,18
+one product,falcon512_s2_h,8,prepack + X resident,3,3236.06,1.051868630371501,24,0
+one product,falcon512_s2_h,8,prepack + fast CPU code,17,3393.61,1.0030351159974187,24,0
+one product,falcon512_s2_h,8,X resident + fast CPU code,18,3249.1,1.0476470407189684,24,0
+one product,falcon512_s2_h,8,prepack + X resident + fast CPU code,19,3240.43,1.0504500945862123,24,0
+one product,falcon512_s2_h,8,prepack + X resident + fast CPU code + no Z clear,51,3308.11,1.028959133765201,24,18
+one product,falcon512_s2_h,8,for reference: old overlap stage (no engine),-1,3658.39,0.9304393462698072,,
+sum of 3 products (ML-KEM decrypt shape),mlkem_x_cbd,3,none,0,1621.0,1.0,24,0
+sum of 3 products (ML-KEM decrypt shape),mlkem_x_cbd,3,prepack,1,1591.21,1.0187216017998881,24,0
+sum of 3 products (ML-KEM decrypt shape),mlkem_x_cbd,3,X resident,2,1570.4,1.03222109016811,24,0
+sum of 3 products (ML-KEM decrypt shape),mlkem_x_cbd,3,fuse sum,4,1514.29,1.0704686684849005,24,0
+sum of 3 products (ML-KEM decrypt shape),mlkem_x_cbd,3,fast CPU code,16,1412.56,1.1475618734779407,24,0
+sum of 3 products (ML-KEM decrypt shape),mlkem_x_cbd,3,prepack + fuse sum,5,1495.92,1.0836140970105352,24,0
+sum of 3 products (ML-KEM decrypt shape),mlkem_x_cbd,3,prepack + X resident + fuse sum,7,1445.95,1.121062277395484,24,0
+sum of 3 products (ML-KEM decrypt shape),mlkem_x_cbd,3,prepack + X resident + fast CPU code,19,1348.91,1.201711011112676,24,0
+sum of 3 products (ML-KEM decrypt shape),mlkem_x_cbd,3,prepack + X resident + fuse sum + fast CPU code,23,1421.48,1.1403607507668063,24,0
+sum of 3 products (ML-KEM decrypt shape),mlkem_x_cbd,3,prepack + X resident + fuse sum + share operand + fast CPU code,31,1423.45,1.1387825353893708,24,0
+"4 products, common operand",mldsa_c_s,3,none,0,1466.31,1.0,24,0
+"4 products, common operand",mldsa_c_s,3,prepack,1,1335.83,1.097677099630941,24,0
+"4 products, common operand",mldsa_c_s,3,X resident,2,1433.03,1.0232235193959651,24,0
+"4 products, common operand",mldsa_c_s,3,share operand,8,1359.73,1.0783832084310856,24,0
+"4 products, common operand",mldsa_c_s,3,fast CPU code,16,854.23,1.7165283354600047,24,0
+"4 products, common operand",mldsa_c_s,3,prepack + X resident + share operand,11,1176.64,1.2461840494968723,24,0
+"4 products, common operand",mldsa_c_s,3,prepack + share operand,9,1221.47,1.2004470023823752,24,0
+"4 products, common operand",mldsa_c_s,3,prepack + share operand + fast CPU code,25,709.95,2.0653708007606166,24,0
+"4 products, common operand",mldsa_c_s,3,prepack + X resident + share operand + fast CPU code,27,664.86,2.205441747134735,24,0
+"4 products, common operand",mldsa_c_s,3,prepack + X resident + fuse sum + share operand + fast CPU code,31,664.88,2.205375406088317,24,0
+"4 products, common operand",mldsa_c_t0,3,none,0,2136.21,1.0,24,0
+"4 products, common operand",mldsa_c_t0,3,prepack,1,2099.34,1.0175626625510874,24,0
+"4 products, common operand",mldsa_c_t0,3,X resident,2,2082.87,1.025608895418341,24,0
+"4 products, common operand",mldsa_c_t0,3,share operand,8,1995.87,1.0703152008898376,24,0
+"4 products, common operand",mldsa_c_t0,3,fast CPU code,16,1890.18,1.130162206773958,24,0
+"4 products, common operand",mldsa_c_t0,3,prepack + X resident + share operand,11,1873.31,1.1403398262967688,24,0
+"4 products, common operand",mldsa_c_t0,3,prepack + share operand,9,1962.66,1.0884259117727981,24,0
+"4 products, common operand",mldsa_c_t0,3,prepack + share operand + fast CPU code,25,1738.19,1.2289853238138524,24,0
+"4 products, common operand",mldsa_c_t0,3,prepack + X resident + share operand + fast CPU code,27,1648.22,1.2960709128635741,24,0
+"4 products, common operand",mldsa_c_t0,3,prepack + X resident + fuse sum + share operand + fast CPU code,31,1648.07,1.2961888754725224,24,0

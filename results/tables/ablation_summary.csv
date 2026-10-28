@@ -1,0 +1,10 @@
+kind,case,none (us),prepack alone (us),X resident alone (us),fuse sum alone (us),share operand alone (us),fast CPU code alone (us),fastest combination,fastest (us),none / fastest
+one product,mlkem_x_cbd,529.32,519.71,512.74,,,460.14,prepack + X resident + fast CPU code,438.82,1.2062349026935875
+one product,mlkem_full,950.37,941.82,916.93,,,951.99,prepack + X resident,909.02,1.0454885481067524
+one product,mldsa_c_s,366.31,333.83,358.01,,,219.63,prepack + X resident + fast CPU code,193.18,1.8962107878662386
+one product,mldsa_c_t0,534.99,525.36,517.75,,,472.06,prepack + X resident + fast CPU code,450.42,1.1877580924470494
+one product,mldsa_full,1995.81,1994.2,1908.94,,,1995.77,prepack + X resident,1908.73,1.04562195805588
+one product,falcon512_s2_h,3403.91,3385.48,3245.95,,,3404.91,prepack + X resident,3236.06,1.051868630371501
+sum of 3 products (ML-KEM decrypt shape),mlkem_x_cbd,1621.0,1591.21,1570.4,1514.29,,1412.56,prepack + X resident + fast CPU code,1348.91,1.201711011112676
+"4 products, common operand",mldsa_c_s,1466.31,1335.83,1433.03,,1359.73,854.23,prepack + X resident + share operand + fast CPU code,664.86,2.205441747134735
+"4 products, common operand",mldsa_c_t0,2136.21,2099.34,2082.87,,1995.87,1890.18,prepack + X resident + fuse sum + share operand + fast CPU code,1648.07,1.2961888754725224
