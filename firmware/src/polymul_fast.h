@@ -8,8 +8,8 @@ enum {
   OPT_FUSE = 4,       // a sum of products is added as integers before one unpacking / unshifting (plan with terms > 1)
   OPT_SHARE = 8,      // products with a common operand: it is packed once and stays loaded
   OPT_FASTCPU = 16,   // unrolled pack / unpack and the one-pass unshift, fold and reduce (kron_fast.cpp)
-  OPT_NOCLEAR = 32,   // experiment: do not clear the lower half of the Z block between products (kept only if the results stay exact)
-  OPT_ALL = 63
+  OPT_NOCLEAR = 32,   // experiment, REJECTED: skipping the clear of the lower Z half gives wrong products on the unit (the bit-exact checks fail), so it is not part of OPT_ALL
+  OPT_ALL = 31
 };
 struct Packed { uint32_t* words; void* pre; };            // a fixed operand packed for one plan: c chunks of hw words, prefix sums (if the plan needs them)
 Packed* packed_new(const KronPlan* p, const int32_t* b);

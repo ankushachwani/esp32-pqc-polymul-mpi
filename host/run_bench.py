@@ -122,7 +122,7 @@ def main():
     for st in STAGES: e2e('E2E falcon verify s%d %d %d' % (st, e_reps['falcon'], plan_for('falcon512_s2_h', st)))
     for opt in (0, 31): e2e('E2E falcon verify f%d %d %d' % (opt, e_reps['falcon'], cf))
     out.flush(); log('done')
-    bad = [r for r in out.rows['check'] + out.rows['check_cpu'] + out.rows['fast_ablation'] + out.rows['fast_sweep'] if r.get('bad')] + [r for r in out.rows['e2e'] if r.get('ok') != 1]
+    bad = [r for r in out.rows['check'] + out.rows['check_cpu'] + [r for r in out.rows['fast_ablation'] if not (r['opt'] & 32)] + out.rows['fast_sweep'] if r.get('bad')] + [r for r in out.rows['e2e'] if r.get('ok') != 1]
     if bad: log('MISMATCHES:', bad); return 1
     return 0
 
