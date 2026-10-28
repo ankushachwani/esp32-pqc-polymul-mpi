@@ -191,8 +191,6 @@ static void cmd_fast(const char* kind, int ci, int c, int opt, int reps) {
   for (int s = 0; s < 4; s++) fillvec(va_ + s * n, n, k.amin, k.amax, 0);
   for (int s = 0; s < nb; s++) fillvec(vb_ + s * n, n, k.bmin, k.bmax, 0);
   hw_on(); Stats st; int bad = 0, checks = 0;
-  const bool single = !strcmp(kind, "single"), sum = !strcmp(kind, "sum"), shared = !strcmp(kind, "shared");
-  if (!single && !sum && !shared) { Serial.println("ERR kind"); return; }
   const int T = sum ? 3 : 1;
   KronPlan pT, p1; if (kron_plan_terms(&k, c, T, &pT) || kron_plan(&k, c, &p1)) { Serial.println("ERR plan infeasible"); return; }
   if (shared && !pT.narrow) { Serial.println("ERR shared needs a narrow plan"); return; }
