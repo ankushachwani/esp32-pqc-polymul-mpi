@@ -20,6 +20,8 @@ typedef struct { void (*load)(const int32_t* a, const int32_t* b); void (*full)(
                  void (*ntt)(void); void (*pointwise)(void); void (*intt)(void); } CpuPoly;
 extern const CpuPoly CPU_MLKEM, CPU_MLDSA, CPU_FALCON;
 const CpuPoly* cpu_poly_for_case(int c);
+extern const CpuPoly CPUT_MLKEM, CPUT_MLDSA, CPUT_FALCON;      // same interface, tuned NTT (ntt_tuned.c)
+const CpuPoly* cpu_tuned_for_case(int c);
 
 // ML-KEM-768
 #define KEM_PK 1184

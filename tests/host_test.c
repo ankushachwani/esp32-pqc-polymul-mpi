@@ -38,6 +38,11 @@ static void test_polymul(void) {
           cp->load(a, b); cp->full(); cp->get(cpu); CHECK(!memcmp(ref, cpu, cs->n * 4), "%s NTT full != reference", cs->name);
           cp->pre(); cp->get(cpu); CHECK(!memcmp(ref, cpu, cs->n * 4), "%s NTT pre != reference", cs->name);
         }
+        if (c == 1 || c == 2 || t >= 30) {
+          const CpuPoly* tp = cpu_tuned_for_case(ci);
+          tp->load(a, b); tp->full(); tp->get(cpu); CHECK(!memcmp(ref, cpu, cs->n * 4), "%s tuned NTT full != reference (c=%d t=%d)", cs->name, c, t);
+          tp->pre(); tp->get(cpu); CHECK(!memcmp(ref, cpu, cs->n * 4), "%s tuned NTT pre != reference", cs->name);
+        }
       }
     }
     printf("polymul %-15s plans %2d, vectors %4d\n", cs->name, plans, vecs);
