@@ -179,18 +179,25 @@ static void sum_mod(int32_t* acc, const int32_t* v, int n, uint32_t q) { for (in
 
 // fill a (or b) of one trial; mode 0 random, 1..3 extreme patterns
 static void cmd_fast(const char* kind, int ci, int c, int opt, int reps) {
-  const KronCase& k = KRON_CASES[ci]; const int n = k.n; vec_init(); make_pool(ci);
-  if (!g_out) g_out = (int32_t*)pool_alloc(8 * 256 * 4 > 2 * 512 * 4 ? 8 * 256 * 4 : 2 * 512 * 4);
-  const bool sh = !strcmp(kind, "shared"); int32_t* out = g_out; int32_t* ref = g_out + (sh ? 4 * 256 : 512); int32_t* tmp = g_vec + 1536;
-  const int ostride = 256;
+  const KronCase& k = KRON_CASES[ci]; const int n = k.n;
+  const bool single = !strcmp(kind, "single"), sum = !strcmp(kind, "sum"), shared = !strcmp(kind, "shared");
+  if (!single && !sum && !shared) { Serial.println("ERR kind"); return; }
+  const int na = sum ? 3 : 1, nb = sum ? 3 : shared ? 4 : 1;
+  // scratch sized by what this command needs (a few KB at n = 256, 18 KB for Falcon): the heap on the board has no large free block
+  int32_t* va_ = (int32_t*)pool_alloc(4 * n * 4); int32_t* vb_ = (int32_t*)pool_alloc(nb * n * 4);
+  int32_t* out = (int32_t*)pool_alloc((shared ? 4 : 1) * n * 4); int32_t* ref = (int32_t*)pool_alloc((shared ? 4 : 1) * n * 4); int32_t* tmp = (int32_t*)pool_alloc(n * 4);
+  const int ostride = n;
+  if (!va_ || !vb_ || !out || !ref || !tmp) { Serial.println("ERR scratch (out of memory for this plan)"); return; }
+  for (int s = 0; s < 4; s++) fillvec(va_ + s * n, n, k.amin, k.amax, 0);
+  for (int s = 0; s < nb; s++) fillvec(vb_ + s * n, n, k.bmin, k.bmax, 0);
   hw_on(); Stats st; int bad = 0, checks = 0;
   const bool single = !strcmp(kind, "single"), sum = !strcmp(kind, "sum"), shared = !strcmp(kind, "shared");
   if (!single && !sum && !shared) { Serial.println("ERR kind"); return; }
-  const int T = sum ? 3 : 1, NB = shared ? 4 : 1;
+  const int T = sum ? 3 : 1;
   KronPlan pT, p1; if (kron_plan_terms(&k, c, T, &pT) || kron_plan(&k, c, &p1)) { Serial.println("ERR plan infeasible"); return; }
   if (shared && !pT.narrow) { Serial.println("ERR shared needs a narrow plan"); return; }
   // fixed operands
-  int32_t* fixb = (int32_t*)pool_alloc(4 * n * 4);                    // the fixed b vectors (secret-like)
+  int32_t* fixb = (int32_t*)pool_alloc(nb * n * 4);                    // the fixed b vectors (secret-like)
   const Packed* pk1[4] = {0, 0, 0, 0}; const Packed* pkT[4] = {0, 0, 0, 0}; void* presum = nullptr;
   auto build_fixed = [&](int32_t* const* bsrc) {
     for (int t = 0; t < 4; t++) { packed_free((Packed*)pk1[t]); packed_free((Packed*)pkT[t]); pk1[t] = pkT[t] = nullptr; }
@@ -213,21 +220,22 @@ static void cmd_fast(const char* kind, int ci, int c, int opt, int reps) {
   };
   auto same = [&]() { if (single || sum) return !memcmp(out, ref, n * 4); for (int t = 0; t < 4; t++) if (memcmp(out + t * ostride, ref + t * ostride, n * 4)) return false; return true; };
   // bit-exactness: random and extreme operands, fresh fixed operands for each trial
-  int32_t* av[4]; int32_t* bv[4]; int32_t* trial = (int32_t*)pool_alloc(4 * n * 4);
-  if (!trial || !fixb || !g_out || !g_vec || !va || !vb) { Serial.println("ERR scratch"); return; }
+  int32_t* av[4] = {0, 0, 0, 0}; int32_t* bv[4] = {0, 0, 0, 0}; int32_t* trial = (int32_t*)pool_alloc(na * n * 4);
+  if (!trial || !fixb) { Serial.println("ERR scratch (out of memory for this plan)"); return; }
   for (int t = 0; t < 24; t++) {
     const int mode = t < 12 ? 0 : 1 + (t - 12) % 3, modeb = t < 12 ? 0 : 1 + (t - 12) / 4 % 3;
-    for (int u = 0; u < 4; u++) { av[u] = trial + u * n; bv[u] = fixb + u * n; fillvec(av[u], n, k.amin, k.amax, mode); fillvec(bv[u], n, k.bmin, k.bmax, modeb); }
+    for (int u = 0; u < na; u++) { av[u] = trial + u * n; fillvec(av[u], n, k.amin, k.amax, mode); }
+    for (int u = 0; u < nb; u++) { bv[u] = fixb + u * n; fillvec(bv[u], n, k.bmin, k.bmax, modeb); }
     build_fixed(bv); reference(av, bv); run(av, bv, opt); checks++; if (!same()) bad++;
   }
   // timing: fixed operands as in the real use (built once), varying operand rotates over the pool
-  for (int u = 0; u < 4; u++) { bv[u] = fixb + u * n; memcpy(bv[u], vb[u], n * 4); }
+  for (int u = 0; u < nb; u++) { bv[u] = fixb + u * n; memcpy(bv[u], vb_ + u * n, n * 4); }
   build_fixed(bv);
   int32_t* arot[4];
-  for (int u = 0; u < 4; u++) arot[u] = va[u];
+  for (int u = 0; u < 4; u++) arot[u] = va_ + u * n;
   run(arot, bv, opt);
   for (int r = 0; r < reps; r++) {
-    for (int u = 0; u < 4; u++) arot[u] = va[(r + u) & 3];
+    for (int u = 0; u < 4; u++) arot[u] = va_ + ((r + u) & 3) * n;
     const uint32_t t0 = cyc(); run(arot, bv, opt); st.add(cyc() - t0);
   }
   Serial.printf("F kind=%s case=%s c=%d opt=%d reps=%d mean_us=%.2f min_us=%.2f max_us=%.2f std_us=%.2f checks=%d bad=%d\n", kind, k.name, c, opt, reps, st.mean(), st.mn, st.mx, st.sd(), checks, bad);
