@@ -2,6 +2,7 @@
 #include <string.h>
 #include "schemes.h"
 #include "polymul_fast.h"
+#include "fast_hooks.h"
 
 struct KemFast { int kind; KronPlan pT, p1; Packed* packT[3]; void* presum; Packed* pack1[3]; int32_t s[3 * 256]; uint32_t opt; size_t bytes; };
 struct DsaFast { int kind; KronPlan pcs, pct; Packed* ps[8]; Packed* pt[4]; int32_t s1[1024], s2[1024], t0[1024]; uint32_t opt; size_t bytes; };

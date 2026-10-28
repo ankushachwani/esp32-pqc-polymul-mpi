@@ -5,6 +5,7 @@
 #include <string.h>
 #include "schemes.h"
 #include "kron_fast.h"
+#include "fast_hooks.h"
 
 void rb_seed(uint64_t s);
 uint32_t prof_now(void) { return 0; }
@@ -145,6 +146,9 @@ static void test_kem(void) {
     CHECK(!memcmp(ss2, ss3, 32), "KEM tuned-NTT decapsulation differs, t=%d", t);
   }
   tuned_free(tk);
+  for (unsigned opt = 0; opt < 64; opt += 1) { if (opt & 32) continue; void* fk = fast_kem_setup(s_std, 3, opt);
+    for (int t = 0; t < 6; t++) { kem_enc(ct, ss1, pk); if (t >= 3) ct[rnd() % KEM_CT] ^= 1u << (rnd() & 7); kem_dec_ref(ss2, ct, sk); kem_dec_fn(ss3, ct, sk, fast_kem_dot, fk); CHECK(!memcmp(ss2, ss3, 32), "KEM optimised-path decapsulation differs, opt=%u", opt); }
+    fast_free(fk); }
   printf("ml-kem-768 decaps variants agree on %d ciphertexts (20 valid, 40 corrupted), tuned NTT on 30 more\n", n);
 }
 
@@ -172,7 +176,11 @@ static void test_dsa(void) {
         CHECK(l1 == l2 && !memcmp(s1, s2, l1), "ML-DSA tuned-NTT signature differs (cached=%d t=%d)", cached, t);
       }
       tuned_free(tc);
-    } }
+    }
+    for (unsigned opt = 0; opt < 64; opt += 1) { if (opt & 32) continue; void* fd = fast_dsa_setup(S1, S2, T0, 2, 3, opt); dsa_ops ops = { fd, NULL, fast_dsa_prod };
+      for (int t = 0; t < 3; t++) { for (int i = 0; i < 64; i++) msg[i] = (uint8_t)rnd(); size_t l1, l2; int a = 0; rb_seed(800 + t); dsa_sign_ref(s1, &l1, msg, 30 + t, sk); rb_seed(800 + t); dsa_sign_ops(s2, &l2, msg, 30 + t, sk, &ops, &a);
+        CHECK(l1 == l2 && !memcmp(s1, s2, l1), "ML-DSA optimised-path signature differs, opt=%u", opt); }
+      fast_free(fd); } }
   printf("ml-dsa-44 signatures identical for 25 messages (rejection-loop passes: total %d, max %d)\n", tot, max_att);
 }
 
@@ -198,7 +206,10 @@ static void test_falcon(void) {
       CHECK(falcon_verify_fn(sig, sl, msg, 48, pk, tuned_fal_prod, tc) == 0, "Falcon tuned-NTT verify rejects a valid signature");
       msg[0] ^= 1; CHECK(falcon_verify_fn(sig, sl, msg, 48, pk, tuned_fal_prod, tc) != 0, "Falcon tuned-NTT verify accepts a tampered message"); msg[0] ^= 1;
       tuned_free(tc);
-    } }
+    }
+    for (unsigned opt = 0; opt < 64; opt += 1) { if (opt & 32) continue; void* ff = fast_fal_setup(H, 8, opt); size_t sl; falcon_sign(sig, &sl, msg, 48, sk);
+      CHECK(falcon_verify_fn(sig, sl, msg, 48, pk, fast_fal_prod, ff) == 0, "Falcon optimised path rejects a valid signature, opt=%u", opt);
+      msg[1] ^= 1; CHECK(falcon_verify_fn(sig, sl, msg, 48, pk, fast_fal_prod, ff) != 0, "Falcon optimised path accepts a tampered message, opt=%u", opt); msg[1] ^= 1; fast_free(ff); } }
   printf("falcon-512: %d valid signatures accepted, %d tampered messages rejected, all three verifiers agree\n", acc, rej);
 }
 

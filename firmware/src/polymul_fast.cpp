@@ -1,7 +1,12 @@
-#include <Arduino.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef PQC_HOST
+#define MOCK_DEFS 1
+#include "mock_mpi_hw.h"          // tests/: the multiplier replaced by a software multiply
+#else
+#include <Arduino.h>
 #include "mpi_hw.h"
+#endif
 #include "polymul_fast.h"
 #include "polymul_hw.h"
 #include "kron_fast.h"

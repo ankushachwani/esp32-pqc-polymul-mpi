@@ -32,6 +32,7 @@
 #include "schemes.h"
 #include "polymul_hw.h"
 #include "polymul_fast.h"
+#include "fast_hooks.h"
 
 extern "C" void rb_seed(uint64_t s);
 static const double MHZ = 240.0;

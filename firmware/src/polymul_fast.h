@@ -23,12 +23,3 @@ void fast_mul_shared(const KronPlan* p, const int32_t* a, int nb, const int32_t*
 // sum of products without fusing: nterms separate products (plan1 has terms == 1) added mod q; used as the "not fused" arm of the ablation
 void fast_sum_unfused(const KronPlan* plan1, int nterms, const int32_t* const* a, const int32_t* const* b, const Packed* const* fb1, int32_t* out, uint32_t opt);
 
-// Scheme hooks (see schemes.h) running on the optimised path. setup() prepares a key (packs the fixed operands) and is outside the timed region.
-void* fast_kem_setup(const int32_t* s_std, int c, uint32_t opt);
-void fast_kem_dot(void* ctx, const int32_t* u, int32_t* out);
-void* fast_dsa_setup(const int32_t* s1, const int32_t* s2, const int32_t* t0, int c_cs, int c_ct0, uint32_t opt);
-void fast_dsa_prod(void* ctx, const int32_t* c, int which, int32_t* out);
-void* fast_fal_setup(const int32_t* h, int c, uint32_t opt);
-void fast_fal_prod(void* ctx, const int32_t* h, const int32_t* s2, int32_t* out);
-size_t fast_ctx_bytes(void* ctx);       // memory held by the prepacked key material
-void fast_free(void* ctx);
