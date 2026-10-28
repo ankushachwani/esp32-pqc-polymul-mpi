@@ -1,6 +1,6 @@
 # Polynomial products for ML-KEM, ML-DSA and Falcon on the ESP32 RSA/MPI unit
 
-The ESP32 has a hardware big-integer multiplier (the "RSA/MPI" unit, operands up to 2048 bits). In an earlier course project (Cryptonite) we ran neural-network layers on it as
+The ESP32 has a hardware big-integer multiplier (the "RSA/MPI" unit, operands up to 2048 bits). In an earlier course project (Cryptonite, not public yet) we ran neural-network layers on it as
 big-integer multiplies (Kronecker packing) and got a 3.9x speed-up from three changes to the data path around the multiply, while still ending up slower than a plain CPU kernel.
 This repo tries the same idea on post-quantum cryptography: pack a negacyclic polynomial product into integer multiplies on the unit, apply those three optimisations, then go further
 (prepacked keys, unrolled pack/unpack code, fused sums, shared operands), and compare against the PQClean clean-C NTT and against an NTT I tuned for this core.
@@ -256,10 +256,11 @@ python3 host/kron_proto.py && python3 host/plan_variants.py
 ./tests/run_host_tests.sh
 
 # board: copy the repo to the machine the ESP32 is plugged into, build, flash, measure (holds the board lock); then the follow-up and the copy back
-rsync -a --exclude .git --exclude .pio --exclude results -e "ssh -o BatchMode=yes -o HostKeyAlias=pi.local" ./ ankushachwani@100.87.8.122:~/pqc_opt/
-ssh -o BatchMode=yes -o HostKeyAlias=pi.local ankushachwani@100.87.8.122 'cd ~/pqc_opt && OUT=results/raw_run ./run_all.sh'          # about 35 minutes
-ssh -o BatchMode=yes -o HostKeyAlias=pi.local ankushachwani@100.87.8.122 'cd ~/pqc_opt && python3 host/run_extra.py results/raw_run'  # ML-KEM, fused sum off
-rsync -a -e "ssh -o BatchMode=yes -o HostKeyAlias=pi.local" ankushachwani@100.87.8.122:~/pqc_opt/results/raw_run/ results/raw/
+export PI=user@host        # the machine the ESP32 is plugged into
+rsync -a --exclude .git --exclude .pio --exclude results -e "ssh -o BatchMode=yes" ./ $PI:~/pqc_opt/
+ssh -o BatchMode=yes $PI 'cd ~/pqc_opt && OUT=results/raw_run ./run_all.sh'          # about 35 minutes
+ssh -o BatchMode=yes $PI 'cd ~/pqc_opt && python3 host/run_extra.py results/raw_run'  # ML-KEM, fused sum off
+rsync -a -e "ssh -o BatchMode=yes" $PI:~/pqc_opt/results/raw_run/ results/raw/
 
 # tables and figures from the raw CSVs
 python3 analysis/make_table.py && python3 analysis/plot.py && python3 analysis/embed_tables.py
@@ -312,15 +313,19 @@ results/raw, tables, figures           final run;   results/raw_v1 first deliver
 
 * PQClean (https://github.com/PQClean/PQClean) for the clean-C ML-KEM, ML-DSA and Falcon implementations and `fips202`; licence files are kept in `vendor/pqclean`. Those implementations derive from the Kyber, Dilithium and Falcon reference code.
 * mbedtls (as shipped with ESP-IDF 4.4.7 in the Arduino-ESP32 core) for the baseline multiply path.
-* Cryptonite, the earlier course project on neural-network inference on the same unit: `firmware/src/mpi_hw.h` is the register driver from there, and the first three optimisations are the ones studied there.
+* Cryptonite, an earlier course project on neural-network inference on the same unit (not public yet): `firmware/src/mpi_hw.h` is the register driver from there, and the first three optimisations are the ones studied there.
+
+## Licence
+
+My code is MIT licensed (see `LICENSE`); `vendor/pqclean` keeps PQClean's licences.
 
 ## Citation
 
 ```
-@misc{pqc_optimizations_microcontroller,
+@misc{esp32_pqc_polymul_mpi,
   author = {ankushachwani},
   title  = {Polynomial products for ML-KEM, ML-DSA and Falcon on the ESP32 RSA/MPI unit},
   year   = {2026},
-  howpublished = {\url{https://github.com/ankushachwani/pqc_optimizations_microcontroller}}
+  howpublished = {\url{https://github.com/ankushachwani/esp32-pqc-polymul-mpi}}
 }
 ```
