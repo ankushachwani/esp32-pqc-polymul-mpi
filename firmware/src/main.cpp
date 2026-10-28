@@ -56,12 +56,15 @@ static int get_plan(int ci, int c, KronPlan* p) {
   return 0;
 }
 
-static int32_t* g_vec;                                           // 4 x 512 scratch for the check commands (heap: the static DRAM segment is full)
-static void vec_init() { if (!g_vec) g_vec = (int32_t*)malloc(4 * 512 * 4); }
+// The static DRAM segment is full and the heap is fragmented once the worker's stack exists, so command scratch comes from one block reserved at boot.
+static uint8_t* g_pool; static size_t g_pool_off; static const size_t POOL_BYTES = 64 * 1024;
+static void* pool_alloc(size_t bytes) { bytes = (bytes + 7) & ~(size_t)7; if (!g_pool || g_pool_off + bytes > POOL_BYTES) return nullptr; void* r = g_pool + g_pool_off; g_pool_off += bytes; return r; }
+static int32_t* g_vec;                                           // 4 x 512 scratch for the check commands
+static void vec_init() { if (!g_vec) g_vec = (int32_t*)pool_alloc(4 * 512 * 4); }
 static int32_t (*va)[512], (*vb)[512];                              // on the heap: the static DRAM segment is too small for them
 static void make_pool(int ci) {
   const KronCase& k = KRON_CASES[ci];
-  if (!va) { va = (int32_t(*)[512])malloc(4 * 512 * 4); vb = (int32_t(*)[512])malloc(4 * 512 * 4); }
+  if (!va) { va = (int32_t(*)[512])pool_alloc(4 * 512 * 4); vb = (int32_t(*)[512])pool_alloc(4 * 512 * 4); }
   for (int s = 0; s < 4; s++) { fillvec(va[s], k.n, k.amin, k.amax, 0); fillvec(vb[s], k.n, k.bmin, k.bmax, 0); }
 }
 
@@ -174,8 +177,9 @@ static void sum_mod(int32_t* acc, const int32_t* v, int n, uint32_t q) { for (in
 // fill a (or b) of one trial; mode 0 random, 1..3 extreme patterns
 static void cmd_fast(const char* kind, int ci, int c, int opt, int reps) {
   const KronCase& k = KRON_CASES[ci]; const int n = k.n; vec_init(); make_pool(ci);
-  if (!g_out) g_out = (int32_t*)malloc(8 * 512 * 4);
-  int32_t* out = g_out; int32_t* ref = g_out + 4 * 512; int32_t* tmp = g_vec + 1536;
+  if (!g_out) g_out = (int32_t*)pool_alloc(8 * 256 * 4 > 2 * 512 * 4 ? 8 * 256 * 4 : 2 * 512 * 4);
+  const bool sh = !strcmp(kind, "shared"); int32_t* out = g_out; int32_t* ref = g_out + (sh ? 4 * 256 : 512); int32_t* tmp = g_vec + 1536;
+  const int ostride = 256;
   hw_on(); Stats st; int bad = 0, checks = 0;
   const bool single = !strcmp(kind, "single"), sum = !strcmp(kind, "sum"), shared = !strcmp(kind, "shared");
   if (!single && !sum && !shared) { Serial.println("ERR kind"); return; }
@@ -183,7 +187,7 @@ static void cmd_fast(const char* kind, int ci, int c, int opt, int reps) {
   KronPlan pT, p1; if (kron_plan_terms(&k, c, T, &pT) || kron_plan(&k, c, &p1)) { Serial.println("ERR plan infeasible"); return; }
   if (shared && !pT.narrow) { Serial.println("ERR shared needs a narrow plan"); return; }
   // fixed operands
-  int32_t* fixb = (int32_t*)malloc(4 * 512 * 4);                       // the fixed b vectors (secret-like)
+  int32_t* fixb = (int32_t*)pool_alloc(4 * 512 * 4);                    // the fixed b vectors (secret-like)
   const Packed* pk1[4] = {0, 0, 0, 0}; const Packed* pkT[4] = {0, 0, 0, 0}; void* presum = nullptr;
   auto build_fixed = [&](int32_t* const* bsrc) {
     for (int t = 0; t < 4; t++) { packed_free((Packed*)pk1[t]); packed_free((Packed*)pkT[t]); pk1[t] = pkT[t] = nullptr; }
@@ -197,16 +201,16 @@ static void cmd_fast(const char* kind, int ci, int c, int opt, int reps) {
     else if (sum) {
       if (o & OPT_FUSE) fast_mul(&pT, (const int32_t* const*)as, (const int32_t* const*)bs, pkT, presum, out, o);
       else fast_sum_unfused(&p1, 3, (const int32_t* const*)as, (const int32_t* const*)bs, pk1, out, o);
-    } else { int32_t* oo[4] = {out, out + 512, out + 1024, out + 1536}; fast_mul_shared(&p1, as[0], 4, (const int32_t* const*)bs, pk1, oo, o); }
+    } else { int32_t* oo[4] = {out, out + ostride, out + 2 * ostride, out + 3 * ostride}; fast_mul_shared(&p1, as[0], 4, (const int32_t* const*)bs, pk1, oo, o); }
   };
   auto reference = [&](int32_t* const* as, int32_t* const* bs) {
     if (single) kron_ref_negacyclic(n, k.q, as[0], bs[0], ref);
     else if (sum) { memset(ref, 0, n * 4); for (int t = 0; t < 3; t++) { kron_ref_negacyclic(n, k.q, as[t], bs[t], tmp); sum_mod(ref, tmp, n, k.q); } }
-    else for (int t = 0; t < 4; t++) kron_ref_negacyclic(n, k.q, as[0], bs[t], ref + t * 512);
+    else for (int t = 0; t < 4; t++) kron_ref_negacyclic(n, k.q, as[0], bs[t], ref + t * ostride);
   };
-  auto same = [&]() { if (single || sum) return !memcmp(out, ref, n * 4); for (int t = 0; t < 4; t++) if (memcmp(out + t * 512, ref + t * 512, n * 4)) return false; return true; };
+  auto same = [&]() { if (single || sum) return !memcmp(out, ref, n * 4); for (int t = 0; t < 4; t++) if (memcmp(out + t * ostride, ref + t * ostride, n * 4)) return false; return true; };
   // bit-exactness: random and extreme operands, fresh fixed operands for each trial
-  int32_t* av[4]; int32_t* bv[4]; static int32_t* trial = nullptr; if (!trial) trial = (int32_t*)malloc(8 * 512 * 4);
+  int32_t* av[4]; int32_t* bv[4]; int32_t* trial = (int32_t*)pool_alloc(4 * 512 * 4);
   for (int t = 0; t < 24; t++) {
     const int mode = t < 12 ? 0 : 1 + (t - 12) % 3, modeb = t < 12 ? 0 : 1 + (t - 12) / 4 % 3;
     for (int u = 0; u < 4; u++) { av[u] = trial + u * 512; bv[u] = fixb + u * 512; fillvec(av[u], n, k.amin, k.amax, mode); fillvec(bv[u], n, k.bmin, k.bmax, modeb); }
@@ -223,7 +227,7 @@ static void cmd_fast(const char* kind, int ci, int c, int opt, int reps) {
     const uint32_t t0 = cyc(); run(arot, bv, opt); st.add(cyc() - t0);
   }
   Serial.printf("F kind=%s case=%s c=%d opt=%d reps=%d mean_us=%.2f min_us=%.2f max_us=%.2f std_us=%.2f checks=%d bad=%d\n", kind, k.name, c, opt, reps, st.mean(), st.mn, st.mx, st.sd(), checks, bad);
-  for (int t = 0; t < 4; t++) { packed_free((Packed*)pk1[t]); packed_free((Packed*)pkT[t]); } free(presum); free(fixb);
+  for (int t = 0; t < 4; t++) { packed_free((Packed*)pk1[t]); packed_free((Packed*)pkT[t]); } free(presum);
 }
 
 static void cmd_hwonly(int ci, int c, int xres, int reps) {
@@ -339,7 +343,6 @@ static uint8_t dpk[DSA_PK], dsk[DSA_SK]; static bool dsa_ready = false; static u
 static uint8_t (*dsig_ref)[DSA_SIG]; static size_t dsig_len[4];
 static void dsa_setup() {
   if (dsa_ready) return;
-  dsig_ref = (uint8_t(*)[DSA_SIG])malloc(4 * DSA_SIG);
   rb_seed(11); dsa_keypair(dpk, dsk);
   for (int i = 0; i < 4; i++) { for (int j = 0; j < 48; j++) dmsg[i][j] = (uint8_t)(i * 31 + j * 7 + 1); rb_seed(500 + i); dsa_sign_ref(dsig_ref[i], &dsig_len[i], dmsg[i], 48, dsk); }
   dsa_ready = true;
@@ -356,7 +359,7 @@ static void e2e_dsa(const char* op, const char* var, int reps, int c1, int c2) {
   }
   void* ctx = nullptr; dsa_ops ops = {nullptr, nullptr, nullptr}; int32_t* sv = nullptr;
   if (v == 10 || v == 11 || v >= 100) {
-    sv = (int32_t*)malloc(3 * 1024 * 4); dsa_unpack_secret(dsk, sv, sv + 1024, sv + 2048);
+    sv = (int32_t*)pool_alloc(3 * 1024 * 4); dsa_unpack_secret(dsk, sv, sv + 1024, sv + 2048);
     if (v == 10 || v == 11) { ctx = tuned_dsa_setup(v == 11, sv, sv + 1024, sv + 2048); ops.ctx = ctx; ops.begin = tuned_dsa_begin; ops.prod = tuned_dsa_prod; }
     else { ctx = fast_dsa_setup(sv, sv + 1024, sv + 2048, c1, c2, (uint32_t)(v - 100)); mem = fast_ctx_bytes(ctx); ops.ctx = ctx; ops.begin = nullptr; ops.prod = fast_dsa_prod; }
   }
@@ -373,7 +376,7 @@ static void e2e_dsa(const char* op, const char* var, int reps, int c1, int c2) {
   }
   char ex[48]; snprintf(ex, sizeof ex, "attempts=%d", attempts_total);
   report("mldsa44", op, var, reps, st, ok, v == -2 ? -1 : prod / reps, mem, v == -2 ? "attempts=na" : ex);
-  if (v == 10 || v == 11) tuned_free(ctx); if (v >= 100) fast_free(ctx); free(sv);
+  if (v == 10 || v == 11) tuned_free(ctx); if (v >= 100) fast_free(ctx);
 }
 
 static uint8_t fpk[FAL_PK], fsk[FAL_SK], fsig[4][FAL_SIG + 8]; static size_t fslen[4]; static uint8_t fmsg[4][48]; static bool fal_ready = false;
@@ -396,7 +399,7 @@ static void e2e_falcon(const char* op, const char* var, int reps, int c1) {
   kron_mul_fn f = (v >= 0 && v < 4) ? polymul_for_stage(v) : nullptr;
   void* ctx = nullptr; fal_prod_fn prodfn = nullptr; int32_t* H = nullptr;
   if (v == 10 || v == 11 || v >= 100) {
-    H = (int32_t*)malloc(512 * 4); falcon_decode_h(fpk, H);
+    H = (int32_t*)pool_alloc(512 * 4); falcon_decode_h(fpk, H);
     if (v == 10 || v == 11) { ctx = tuned_fal_setup(v == 11, H); prodfn = tuned_fal_prod; }
     else { ctx = fast_fal_setup(H, c1, (uint32_t)(v - 100)); prodfn = fast_fal_prod; mem = fast_ctx_bytes(ctx); }
   }
@@ -410,12 +413,13 @@ static void e2e_falcon(const char* op, const char* var, int reps, int c1) {
     if ((rc == 0) == tamper) ok = 0;
   }
   report("falcon512", op, var, reps, st, ok, v == -2 ? -1 : prod / reps, mem, "");
-  if (v == 10 || v == 11) tuned_free(ctx); if (v >= 100) fast_free(ctx); free(H);
+  if (v == 10 || v == 11) tuned_free(ctx); if (v >= 100) fast_free(ctx);
 }
 
 // ---------------------------------------------------------------- command loop
 static char* tok(char** s) { while (**s == ' ') (*s)++; if (!**s) return nullptr; char* t = *s; while (**s && **s != ' ') (*s)++; if (**s) { **s = 0; (*s)++; } return t; }
 static void handle(char* line) {
+  g_pool_off = 0; va = vb = nullptr; g_vec = nullptr; g_out = nullptr;                // command scratch is per command
   char* s = line; char* cmd = tok(&s); if (!cmd) return;
   char* a[8] = {0}; for (int i = 0; i < 8; i++) a[i] = tok(&s);
   auto I = [&](int i) { return a[i] ? atoi(a[i]) : 0; };
@@ -457,6 +461,7 @@ static void worker(void*) {
 
 void setup() {
   Serial.begin(115200); delay(300);
+  g_pool = (uint8_t*)malloc(POOL_BYTES); dsig_ref = (uint8_t(*)[DSA_SIG])malloc(4 * DSA_SIG); cpu_tuned_prepare();
   xTaskCreatePinnedToCore(worker, "pqc", 98304, nullptr, 1, nullptr, 1);
 }
 void loop() { vTaskDelay(1000); }

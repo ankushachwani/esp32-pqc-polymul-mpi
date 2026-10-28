@@ -68,3 +68,5 @@ void tuned_fal_prod(void* ctx, const int32_t* h, const int32_t* s2, int32_t* out
   memcpy(x, s2, sizeof x); tntt_fwd(&tn[TN_FALCON], x); tntt_mul(&tn[TN_FALCON], out, x, f->hh); tntt_inv(&tn[TN_FALCON], out);
 }
 void tuned_free(void* ctx) { free(ctx); }
+
+void cpu_tuned_prepare(void) { init_all(); }

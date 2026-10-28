@@ -26,6 +26,7 @@ extern const CpuPoly CPU_MLKEM, CPU_MLDSA, CPU_FALCON;
 const CpuPoly* cpu_poly_for_case(int c);
 extern const CpuPoly CPUT_MLKEM, CPUT_MLDSA, CPUT_FALCON;      // same interface, tuned NTT (ntt_tuned.c)
 const CpuPoly* cpu_tuned_for_case(int c);
+void cpu_tuned_prepare(void);           // allocate its tables now (heap is fragmented later)
 
 // Product hooks for the optimised and tuned variants. Each receives a context holding whatever was prepared for the key (packed secret, transformed secret).
 typedef void (*kem_dot_fn)(void* ctx, const int32_t* u /* 3 x 256 */, int32_t* out /* 256, in [0, q) */);                 // out = sum_i s_i * u_i

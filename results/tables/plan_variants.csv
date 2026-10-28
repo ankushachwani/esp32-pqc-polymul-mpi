@@ -1,0 +1,7 @@
+case,now: slot bits,now: multiplies,signed slots: slot bits,signed slots: multiplies,Karatsuba: slot bits,Karatsuba: multiplies
+mlkem_x_cbd,21,9,20,9,22,12
+mlkem_full,30,16,29,16,32,12
+mldsa_c_s,11,4,10,4,13,3
+mldsa_c_t0,21,9,20,9,22,12
+mldsa_full,47,36,46,36,48,48
+falcon512_s2_h,32,64,31,64,34,75
