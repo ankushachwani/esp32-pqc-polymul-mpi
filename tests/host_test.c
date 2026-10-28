@@ -4,8 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include "schemes.h"
+#include "kron_fast.h"
 
 void rb_seed(uint64_t s);
+uint32_t prof_now(void) { return 0; }
 static uint64_t st = 88172645463325252ull;
 static uint32_t rnd(void) { st ^= st << 13; st ^= st >> 7; st ^= st << 17; return (uint32_t)(st >> 11); }
 static int32_t rin(int32_t lo, int32_t hi) { return lo + (int32_t)(rnd() % (uint32_t)(hi - lo + 1)); }
@@ -47,6 +49,56 @@ static void test_polymul(void) {
     }
     printf("polymul %-15s plans %2d, vectors %4d\n", cs->name, plans, vecs);
   }
+}
+
+// the same pipeline as kron_mul_sw but with the fast pack / unpack / finish
+static void mul_sw_fast(const KronPlan* p, const int32_t* a, const int32_t* b, int32_t* out) {
+  static uint32_t A[KRON_MAX_CHUNKS * KRON_MAX_WORDS], B[KRON_MAX_CHUNKS * KRON_MAX_WORDS], z[KRON_ZWORDS];
+  static uint64_t acc[KRON_MAX_ACC]; static int64_t pa[KRON_MAX_N + 1], pb[KRON_MAX_N + 1];
+  memset(acc, 0, kron_acc_bytes(p));
+  for (int i = 0; i < p->c; i++) { kron_pack_fast(p, a, p->oa, i, A + i * p->hw); kron_pack_fast(p, b, p->ob, i, B + i * p->hw); }
+  for (int i = 0; i < p->c; i++) for (int j = 0; j < p->c; j++) { kron_sw_mul(A + i * p->hw, B + j * p->hw, p->hw, z); memset(z + 2 * p->hw, 0, 16); kron_accum_fast(p, z, i, j, acc); }
+  kron_prefix(p, a, b, pa, pb);
+  kron_finish_fast(p, acc, pa, pb, out);
+}
+static void mul_sw_fast_sum(const KronPlan* p, const int32_t* const* a, const int32_t* const* b, int32_t* out) {
+  static uint32_t A[4][KRON_MAX_CHUNKS * KRON_MAX_WORDS], B[4][KRON_MAX_CHUNKS * KRON_MAX_WORDS], z[KRON_ZWORDS], zs[KRON_ZWORDS];
+  static uint64_t acc[KRON_MAX_ACC]; static int64_t pa[KRON_MAX_N + 1], pb[KRON_MAX_N + 1]; static int32_t sa[KRON_MAX_N], sb[KRON_MAX_N];
+  memset(acc, 0, kron_acc_bytes(p));
+  for (int t = 0; t < p->terms; t++) for (int i = 0; i < p->c; i++) { kron_pack_fast(p, a[t], p->oa, i, A[t] + i * p->hw); kron_pack_fast(p, b[t], p->ob, i, B[t] + i * p->hw); }
+  for (int i = 0; i < p->c; i++) for (int j = 0; j < p->c; j++) {
+    memset(zs, 0, sizeof zs);
+    for (int t = 0; t < p->terms; t++) { kron_sw_mul(A[t] + i * p->hw, B[t] + j * p->hw, p->hw, z); uint64_t cy = 0; for (uint32_t k = 0; k < 2 * p->hw; k++) { const uint64_t v = (uint64_t)zs[k] + z[k] + cy; zs[k] = (uint32_t)v; cy = v >> 32; } }
+    kron_accum_fast(p, zs, i, j, acc);
+  }
+  kron_sumvec(a, p->terms, p->n, sa); kron_sumvec(b, p->terms, p->n, sb); kron_prefix(p, sa, sb, pa, pb); kron_finish_fast(p, acc, pa, pb, out);
+}
+static void test_fast(void) {
+  static int32_t a[512], b[512], ref[512], got[512]; int checks = 0, narrow = 0;
+  static uint32_t g1[64], g2[64];
+  for (int ci = 0; ci < N_CASES; ci++) {
+    const KronCase* cs = &KRON_CASES[ci];
+    for (int c = 1; c <= KRON_MAX_CHUNKS; c++) {
+      KronPlan p; if (kron_plan(cs, c, &p)) continue; if (p.narrow) narrow++;
+      for (int t = 0; t < 14; t++) {
+        const int mode = t < 10 ? 0 : 1 + (t - 10) % 3;
+        fillvec(a, cs->n, cs->amin, cs->amax, mode); fillvec(b, cs->n, cs->bmin, cs->bmax, mode == 1 ? 2 : mode == 2 ? 1 : mode);
+        kron_ref_negacyclic(cs->n, cs->q, a, b, ref); mul_sw_fast(&p, a, b, got); checks++;
+        CHECK(!memcmp(ref, got, cs->n * 4), "fast pack/unpack/finish differ: %s c=%d mode %d", cs->name, c, mode);
+        if (p.narrow && t < 3) for (int ch = 0; ch < c; ch++) { kron_pack(&p, a, p.oa, ch, g1); kron_pack_fast(&p, a, p.oa, ch, g2); CHECK(!memcmp(g1, g2, p.hw * 4), "pack chunk differs %s c=%d", cs->name, ch); }
+      }
+    }
+  }
+  { static int32_t aa[4][512], bb[4][512]; const int32_t *pa[4], *pb[4]; int sc = 0;
+    for (int ci = 0; ci < N_CASES; ci++) { const KronCase* cs = &KRON_CASES[ci];
+      for (int terms = 2; terms <= 4; terms++) for (int c = 1; c <= 8; c++) { KronPlan p; if (kron_plan_terms(cs, c, terms, &p) || !p.narrow) continue;
+        for (int t = 0; t < 6; t++) { const int mode = t < 4 ? 0 : 1 + (t - 4);
+          for (int k = 0; k < terms; k++) { fillvec(aa[k], cs->n, cs->amin, cs->amax, mode); fillvec(bb[k], cs->n, cs->bmin, cs->bmax, mode == 1 ? 2 : mode == 2 ? 1 : mode); pa[k] = aa[k]; pb[k] = bb[k]; }
+          static int32_t acc[512], tmp[512]; memset(acc, 0, sizeof acc);
+          for (int k = 0; k < terms; k++) { kron_ref_negacyclic(cs->n, cs->q, aa[k], bb[k], tmp); for (int i = 0; i < cs->n; i++) acc[i] = (acc[i] + tmp[i]) % cs->q; }
+          mul_sw_fast_sum(&p, pa, pb, got); sc++; CHECK(!memcmp(acc, got, cs->n * 4), "fast fused sum differs: %s terms=%d c=%d", cs->name, terms, c); } } }
+    checks += sc; }
+  printf("fast pack/unpack/finish agree with the reference in %d checks (%d narrow plans)\n", checks, narrow);
 }
 
 static void test_sum(void) {
@@ -151,7 +203,7 @@ static void test_falcon(void) {
 }
 
 int main(void) {
-  test_polymul(); test_sum(); test_kem(); test_dsa(); test_falcon();
+  test_polymul(); test_sum(); test_fast(); test_kem(); test_dsa(); test_falcon();
   printf(fails ? "%d FAILURES\n" : "all host tests passed\n", fails);
   return fails != 0;
 }

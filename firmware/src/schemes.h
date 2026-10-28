@@ -9,6 +9,10 @@
 extern "C" {
 #endif
 
+// Cycle counter for the in-situ timing of the product steps inside the scheme variants (firmware: ESP.getCycleCount; host tests: 0).
+uint32_t prof_now(void);
+extern uint32_t g_prod_cycles;          // cycles spent in the replaceable product steps since it was last cleared
+
 // Polynomial-product cases (ranges are the guaranteed ranges of the real operands, see host/kron_proto.py)
 enum { CASE_MLKEM_X_CBD, CASE_MLKEM_FULL, CASE_MLDSA_C_S, CASE_MLDSA_C_T0, CASE_MLDSA_FULL, CASE_FALCON_S2_H, N_CASES };
 extern const KronCase KRON_CASES[N_CASES];

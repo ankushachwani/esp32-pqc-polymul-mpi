@@ -46,6 +46,7 @@ void kem_indcpa_dec_var(uint8_t* m, const uint8_t* ct, const uint8_t* sk, const 
   polyvec b; poly v, mp;
   P(polyvec_decompress)(&b, ct);
   P(poly_decompress)(&v, ct + KYBER_POLYVECCOMPRESSEDBYTES);
+  const uint32_t pt = prof_now();
   if (!mul) {
     polyvec skpv; P(polyvec_frombytes)(&skpv, sk);
     P(polyvec_ntt)(&b);
@@ -60,6 +61,7 @@ void kem_indcpa_dec_var(uint8_t* m, const uint8_t* ct, const uint8_t* sk, const 
     }
     for (int j = 0; j < KYBER_N; j++) mp.coeffs[j] = (int16_t)(acc[j] % KYBER_Q);
   }
+  g_prod_cycles += prof_now() - pt;
   P(poly_sub)(&mp, &v, &mp);
   P(poly_reduce)(&mp);
   P(poly_tomsg)(m, &mp);
@@ -83,7 +85,9 @@ void kem_indcpa_dec_fn(uint8_t* m, const uint8_t* ct, kem_dot_fn dot, void* ctx)
   P(polyvec_decompress)(&b, ct);
   P(poly_decompress)(&v, ct + KYBER_POLYVECCOMPRESSEDBYTES);
   for (int i = 0; i < KYBER_K; i++) for (int j = 0; j < KYBER_N; j++) u[i * KYBER_N + j] = b.vec[i].coeffs[j];
+  const uint32_t pt = prof_now();
   dot(ctx, u, t);
+  g_prod_cycles += prof_now() - pt;
   for (int j = 0; j < KYBER_N; j++) mp.coeffs[j] = (int16_t)t[j];
   P(poly_sub)(&mp, &v, &mp);
   P(poly_reduce)(&mp);

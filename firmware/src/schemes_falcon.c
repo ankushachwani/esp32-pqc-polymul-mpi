@@ -41,7 +41,6 @@ int falcon_verify_var(const uint8_t* sig, size_t siglen, const uint8_t* m, size_
   const uint8_t* nonce = sig + 1; const uint8_t* sigbuf = sig + 1 + NONCELEN; const size_t sigbuflen = siglen - 1 - NONCELEN;
   if (pk[0] != 0x00 + 9) return -1;
   if (FP(modq_decode)(h, LOGN, pk + 1, FAL_PK - 1) != FAL_PK - 1) return -1;
-  if (!mul) FP(to_ntt_monty)(h, LOGN);
   if (sigbuflen == 0) return -1;
   if (FP(comp_decode)(s2, LOGN, sigbuf, sigbuflen) != sigbuflen) return -1;
 
@@ -52,13 +51,23 @@ int falcon_verify_var(const uint8_t* sig, size_t siglen, const uint8_t* m, size_
   FP(hash_to_point_ct)(&sc, hm, LOGN, tmp.b);
   inner_shake256_ctx_release(&sc);
 
-  if (!mul) return FP(verify_raw)(hm, s2, h, LOGN, tmp.b) ? 0 : -1;
+  if (!mul) {      // PQClean's verify_raw written out (same operations), so that the product steps can be timed on their own
+    uint16_t* tt = (uint16_t*)tmp.b; int16_t s1n[FN];
+    const uint32_t pt = prof_now();
+    FP(to_ntt_monty)(h, LOGN);
+    for (int u = 0; u < FN; u++) { uint32_t w = (uint32_t)s2[u]; w += Q & -(w >> 31); tt[u] = (uint16_t)w; }
+    mq_NTT(tt, LOGN); mq_poly_montymul_ntt(tt, h, LOGN); mq_iNTT(tt, LOGN);
+    g_prod_cycles += prof_now() - pt;
+    mq_poly_sub(tt, hm, LOGN);
+    for (int u = 0; u < FN; u++) { int32_t w = (int32_t)tt[u]; w -= (int32_t)(Q & -(((Q >> 1) - (uint32_t)w) >> 31)); s1n[u] = (int16_t)w; }
+    return FP(is_short)(s1n, s2, LOGN) ? 0 : -1;
+  }
 
   // -s1 = h*s2 - c0 mod q, normalised to [-q/2, q/2], then the same norm test
   int32_t a[FN], b[FN], prod[FN];
   int16_t s1[FN];
   for (int i = 0; i < FN; i++) { a[i] = s2[i]; b[i] = h[i]; }
-  mul(plan, a, b, prod);
+  { const uint32_t pt = prof_now(); mul(plan, a, b, prod); g_prod_cycles += prof_now() - pt; }
   for (int i = 0; i < FN; i++) {
     int32_t w = prod[i] - (int32_t)hm[i];
     if (w < 0) w += Q;
@@ -93,7 +102,7 @@ int falcon_verify_fn(const uint8_t* sig, size_t siglen, const uint8_t* m, size_t
   int32_t a[FN], b[FN], pr[FN];
   int16_t s1[FN];
   for (int i = 0; i < FN; i++) { a[i] = h[i]; b[i] = s2[i]; }
-  prod(ctx, a, b, pr);
+  { const uint32_t pt = prof_now(); prod(ctx, a, b, pr); g_prod_cycles += prof_now() - pt; }
   for (int i = 0; i < FN; i++) {
     int32_t w = pr[i] - (int32_t)hm[i];
     if (w < 0) w += Q;

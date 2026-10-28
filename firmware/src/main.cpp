@@ -14,7 +14,8 @@
 //   HWLAT                                   multiplier cost per operand size: mbedtls vs driver, load / compute / read, and sizes beyond 2048 bits through mbedtls
 //   ACQ <reps>                              cost of acquiring and releasing the unit
 //   E2E <scheme> <op> <variant> <reps> <c1> <c2>
-//         scheme kem | dsa | falcon;  variant ref (PQClean as shipped), cpu (copy of it, NTT), s0..s3 (product on the MPI unit)
+//         scheme kem | dsa | falcon;  variant ref (PQClean as shipped), cpu (copy of it, NTT), s0..s3 (product on the MPI unit, first four stages),
+//         t / tc (tuned NTT; the key's transform redone per call / cached), f<N> (optimised MPI path, N = OPT_* switches, key prepacked)
 //         kem:   op dec | indcpa | keygen | enc      c1 = plan for the u*s product
 //         dsa:   op sign | verify                    c1 = plan c*s1/c*s2, c2 = plan c*t0
 //         falcon op verify | sign                    c1 = plan for h*s2
@@ -280,9 +281,17 @@ static void cmd_acq(int reps) {
 }
 
 // ---------------------------------------------------------------- whole-scheme runs
-static int parse_variant(const char* s) { if (!strcmp(s, "ref")) return -2; if (!strcmp(s, "cpu")) return -1; if (s[0] == 's' && s[1] >= '0' && s[1] <= '3') return s[1] - '0'; return -3; }
-static void report(const char* scheme, const char* op, const char* variant, int reps, const Stats& st, int ok, const char* extra) {
-  Serial.printf("E scheme=%s op=%s variant=%s reps=%d mean_us=%.1f min_us=%.1f max_us=%.1f std_us=%.1f ok=%d %s\n", scheme, op, variant, reps, st.mean(), st.mn, st.mx, st.sd(), ok, extra);
+// variants: ref (PQClean as shipped), cpu (copy of it), s0..s3 (old stages), t / tc (tuned NTT, key transform per call / cached), f<N> (optimised path with switches N)
+static int parse_variant(const char* s) {
+  if (!strcmp(s, "ref")) return -2; if (!strcmp(s, "cpu")) return -1; if (!strcmp(s, "t")) return 10; if (!strcmp(s, "tc")) return 11;
+  if (s[0] == 's' && s[1] >= '0' && s[1] <= '3' && !s[2]) return s[1] - '0';
+  if (s[0] == 'f' && s[1]) return 100 + atoi(s + 1);
+  return -3;
+}
+extern "C" uint32_t prof_now(void) { return cyc(); }
+static void report(const char* scheme, const char* op, const char* variant, int reps, const Stats& st, int ok, double prod_us, size_t mem, const char* extra) {
+  Serial.printf("E scheme=%s op=%s variant=%s reps=%d mean_us=%.1f min_us=%.1f max_us=%.1f std_us=%.1f ok=%d prod_us=%.1f mem_bytes=%u %s\n", scheme, op, variant, reps, st.mean(), st.mn, st.mx, st.sd(), ok,
+                prod_us, (unsigned)mem, extra);
 }
 
 static uint8_t kpk[KEM_PK], ksk[KEM_SK], kct[4][KEM_CT], kss[4][KEM_SS]; static int32_t ks_std[3 * 256]; static bool kem_ready = false;
@@ -294,32 +303,36 @@ static void kem_setup() {
 }
 static void e2e_kem(const char* op, const char* var, int reps, int c1) {
   kem_setup(); const int v = parse_variant(var); if (v == -3) { Serial.println("ERR variant"); return; }
-  KronPlan p; if (v >= 0) { if (get_plan(CASE_MLKEM_X_CBD, c1, &p)) return; hw_for_stage(v); } else hw_off();
-  kron_mul_fn f = v >= 0 ? polymul_for_stage(v) : nullptr; const KronPlan* pp = v >= 0 ? &p : nullptr;
-  Stats st; int ok = 1; uint8_t ss[KEM_SS], m1[32], m2[32];
+  KronPlan p; if (v >= 0 && v < 4) { if (get_plan(CASE_MLKEM_X_CBD, c1, &p)) return; hw_for_stage(v); } else if (v >= 100) hw_on(); else hw_off();
+  kron_mul_fn f = (v >= 0 && v < 4) ? polymul_for_stage(v) : nullptr; const KronPlan* pp = (v >= 0 && v < 4) ? &p : nullptr;
+  void* ctx = nullptr; kem_dot_fn dot = nullptr; size_t mem = 0;
+  if (v == 10 || v == 11) { ctx = tuned_kem_setup(ks_std); dot = tuned_kem_dot; }
+  if (v >= 100) { ctx = fast_kem_setup(ks_std, c1, (uint32_t)(v - 100)); dot = fast_kem_dot; mem = fast_ctx_bytes(ctx); }
+  Stats st; int ok = 1; uint8_t ss[KEM_SS], m1[32], m2[32]; double prod = 0;
   const bool dec = !strcmp(op, "dec"), indcpa = !strcmp(op, "indcpa");
   if (!dec && !indcpa) {
     if (v != -2) { Serial.println("ERR keygen/enc only exist as ref"); return; }
     static uint8_t pk[KEM_PK], sk[KEM_SK], ct[KEM_CT];
     for (int r = 0; r < reps; r++) { rb_seed(100 + r); const uint32_t t0 = cyc(); if (!strcmp(op, "keygen")) kem_keypair(pk, sk); else kem_enc(ct, ss, kpk); st.add(cyc() - t0); }
-    report("mlkem768", op, var, reps, st, 1, ""); return;
+    report("mlkem768", op, var, reps, st, 1, -1, 0, ""); return;
   }
   for (int r = 0; r < reps; r++) {
-    const int i = r & 3; uint32_t t0;
+    const int i = r & 3; uint32_t t0; g_prod_cycles = 0;
     if (dec) {
       t0 = cyc();
-      if (v == -2) kem_dec_ref(ss, kct[i], ksk); else kem_dec_var(ss, kct[i], ksk, ks_std, f, pp);
-      st.add(cyc() - t0);
+      if (v == -2) kem_dec_ref(ss, kct[i], ksk); else if (dot) kem_dec_fn(ss, kct[i], ksk, dot, ctx); else kem_dec_var(ss, kct[i], ksk, ks_std, f, pp);
+      st.add(cyc() - t0); prod += g_prod_cycles / MHZ;
       uint8_t ref[KEM_SS]; kem_dec_ref(ref, kct[i], ksk); if (memcmp(ref, ss, 32)) ok = 0;
       if (i < 2 && memcmp(ss, kss[i], 32)) ok = 0;
     } else {
       t0 = cyc();
-      if (v == -2) kem_indcpa_dec_ref(m1, kct[i], ksk); else kem_indcpa_dec_var(m1, kct[i], ksk, ks_std, f, pp);
-      st.add(cyc() - t0);
+      if (v == -2) kem_indcpa_dec_ref(m1, kct[i], ksk); else if (dot) kem_indcpa_dec_fn(m1, kct[i], dot, ctx); else kem_indcpa_dec_var(m1, kct[i], ksk, ks_std, f, pp);
+      st.add(cyc() - t0); prod += g_prod_cycles / MHZ;
       kem_indcpa_dec_ref(m2, kct[i], ksk); if (memcmp(m1, m2, 32)) ok = 0;
     }
   }
-  report("mlkem768", op, var, reps, st, ok, "");
+  report("mlkem768", op, var, reps, st, ok, v == -2 ? -1 : prod / reps, mem, "");
+  if (v == 10 || v == 11) tuned_free(ctx); if (v >= 100) fast_free(ctx);
 }
 
 static uint8_t dpk[DSA_PK], dsk[DSA_SK]; static bool dsa_ready = false; static uint8_t dmsg[4][48];
@@ -334,24 +347,33 @@ static void dsa_setup() {
 static uint8_t dsig[DSA_SIG];
 static void e2e_dsa(const char* op, const char* var, int reps, int c1, int c2) {
   dsa_setup(); const int v = parse_variant(var); if (v == -3) { Serial.println("ERR variant"); return; }
-  KronPlan pcs, pct; if (v >= 0) { if (get_plan(CASE_MLDSA_C_S, c1, &pcs) || get_plan(CASE_MLDSA_C_T0, c2, &pct)) return; hw_for_stage(v); } else hw_off();
-  kron_mul_fn f = v >= 0 ? polymul_for_stage(v) : nullptr; Stats st; int ok = 1; int attempts_total = 0; size_t sl;
+  KronPlan pcs, pct; if (v >= 0 && v < 4) { if (get_plan(CASE_MLDSA_C_S, c1, &pcs) || get_plan(CASE_MLDSA_C_T0, c2, &pct)) return; hw_for_stage(v); } else if (v >= 100) hw_on(); else hw_off();
+  kron_mul_fn f = (v >= 0 && v < 4) ? polymul_for_stage(v) : nullptr; Stats st; int ok = 1; int attempts_total = 0; size_t sl; double prod = 0; size_t mem = 0;
   if (!strcmp(op, "verify")) {
     if (v != -2) { Serial.println("ERR verify only exists as ref"); return; }
     for (int r = 0; r < reps; r++) { const int i = r & 3; const uint32_t t0 = cyc(); const int rc = dsa_verify(dsig_ref[i], dsig_len[i], dmsg[i], 48, dpk); st.add(cyc() - t0); if (rc) ok = 0; }
-    report("mldsa44", op, var, reps, st, ok, "attempts=0"); return;
+    report("mldsa44", op, var, reps, st, ok, -1, 0, "attempts=0"); return;
+  }
+  void* ctx = nullptr; dsa_ops ops = {nullptr, nullptr, nullptr}; int32_t* sv = nullptr;
+  if (v == 10 || v == 11 || v >= 100) {
+    sv = (int32_t*)malloc(3 * 1024 * 4); dsa_unpack_secret(dsk, sv, sv + 1024, sv + 2048);
+    if (v == 10 || v == 11) { ctx = tuned_dsa_setup(v == 11, sv, sv + 1024, sv + 2048); ops.ctx = ctx; ops.begin = tuned_dsa_begin; ops.prod = tuned_dsa_prod; }
+    else { ctx = fast_dsa_setup(sv, sv + 1024, sv + 2048, c1, c2, (uint32_t)(v - 100)); mem = fast_ctx_bytes(ctx); ops.ctx = ctx; ops.begin = nullptr; ops.prod = fast_dsa_prod; }
   }
   for (int r = 0; r < reps; r++) {
-    const int i = r & 3; int att = 1;
+    const int i = r & 3; int att = 1; g_prod_cycles = 0;
     rb_seed(500 + i);
     const uint32_t t0 = cyc();
-    if (v == -2) dsa_sign_ref(dsig, &sl, dmsg[i], 48, dsk); else dsa_sign_var(dsig, &sl, dmsg[i], 48, dsk, f, &pcs, &pct, &att);
-    st.add(cyc() - t0);
+    if (v == -2) dsa_sign_ref(dsig, &sl, dmsg[i], 48, dsk);
+    else if (ctx) dsa_sign_ops(dsig, &sl, dmsg[i], 48, dsk, &ops, &att);
+    else dsa_sign_var(dsig, &sl, dmsg[i], 48, dsk, f, &pcs, &pct, &att);
+    st.add(cyc() - t0); prod += g_prod_cycles / MHZ;
     if (sl != dsig_len[i] || memcmp(dsig, dsig_ref[i], sl)) ok = 0;
     attempts_total += att;
   }
   char ex[48]; snprintf(ex, sizeof ex, "attempts=%d", attempts_total);
-  report("mldsa44", op, var, reps, st, ok, v == -2 ? "attempts=na" : ex);
+  report("mldsa44", op, var, reps, st, ok, v == -2 ? -1 : prod / reps, mem, v == -2 ? "attempts=na" : ex);
+  if (v == 10 || v == 11) tuned_free(ctx); if (v >= 100) fast_free(ctx); free(sv);
 }
 
 static uint8_t fpk[FAL_PK], fsk[FAL_SK], fsig[4][FAL_SIG + 8]; static size_t fslen[4]; static uint8_t fmsg[4][48]; static bool fal_ready = false;
@@ -363,23 +385,32 @@ static void fal_setup() {
 }
 static void e2e_falcon(const char* op, const char* var, int reps, int c1) {
   fal_setup(); const int v = parse_variant(var); if (v == -3) { Serial.println("ERR variant"); return; }
-  Stats st; int ok = 1;
+  Stats st; int ok = 1; double prod = 0; size_t mem = 0;
   if (!strcmp(op, "sign")) {
     if (v != -2) { Serial.println("ERR sign only exists as ref"); return; }
     static uint8_t sg[FAL_SIG + 8]; size_t sl;
     for (int r = 0; r < reps; r++) { rb_seed(900 + (r & 3)); const uint32_t t0 = cyc(); falcon_sign(sg, &sl, fmsg[r & 3], 48, fsk); st.add(cyc() - t0); }
-    report("falcon512", op, var, reps, st, 1, ""); return;
+    report("falcon512", op, var, reps, st, 1, -1, 0, ""); return;
   }
-  KronPlan p; if (v >= 0) { if (get_plan(CASE_FALCON_S2_H, c1, &p)) return; hw_for_stage(v); } else hw_off();
-  kron_mul_fn f = v >= 0 ? polymul_for_stage(v) : nullptr;
+  KronPlan p; if (v >= 0 && v < 4) { if (get_plan(CASE_FALCON_S2_H, c1, &p)) return; hw_for_stage(v); } else if (v >= 100) hw_on(); else hw_off();
+  kron_mul_fn f = (v >= 0 && v < 4) ? polymul_for_stage(v) : nullptr;
+  void* ctx = nullptr; fal_prod_fn prodfn = nullptr; int32_t* H = nullptr;
+  if (v == 10 || v == 11 || v >= 100) {
+    H = (int32_t*)malloc(512 * 4); falcon_decode_h(fpk, H);
+    if (v == 10 || v == 11) { ctx = tuned_fal_setup(v == 11, H); prodfn = tuned_fal_prod; }
+    else { ctx = fast_fal_setup(H, c1, (uint32_t)(v - 100)); prodfn = fast_fal_prod; mem = fast_ctx_bytes(ctx); }
+  }
   for (int r = 0; r < reps; r++) {
     const int i = r & 3; uint8_t m[48]; memcpy(m, fmsg[i], 48); const bool tamper = r & 4; if (tamper) m[r % 48] ^= 1;     // half of the runs verify a tampered message (must reject)
-    const uint32_t t0 = cyc(); int rc;
-    if (v == -2) rc = falcon_verify_ref(fsig[i], fslen[i], m, 48, fpk); else rc = falcon_verify_var(fsig[i], fslen[i], m, 48, fpk, f, v >= 0 ? &p : nullptr);
-    st.add(cyc() - t0);
+    g_prod_cycles = 0; const uint32_t t0 = cyc(); int rc;
+    if (v == -2) rc = falcon_verify_ref(fsig[i], fslen[i], m, 48, fpk);
+    else if (prodfn) rc = falcon_verify_fn(fsig[i], fslen[i], m, 48, fpk, prodfn, ctx);
+    else rc = falcon_verify_var(fsig[i], fslen[i], m, 48, fpk, f, v >= 0 ? &p : nullptr);
+    st.add(cyc() - t0); prod += g_prod_cycles / MHZ;
     if ((rc == 0) == tamper) ok = 0;
   }
-  report("falcon512", op, var, reps, st, ok, "");
+  report("falcon512", op, var, reps, st, ok, v == -2 ? -1 : prod / reps, mem, "");
+  if (v == 10 || v == 11) tuned_free(ctx); if (v >= 100) fast_free(ctx); free(H);
 }
 
 // ---------------------------------------------------------------- command loop

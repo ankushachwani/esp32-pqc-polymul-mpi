@@ -34,7 +34,9 @@ int dsa_verify(const uint8_t* sig, size_t siglen, const uint8_t* m, size_t mlen,
 
 // out = c * v (coefficients in [0, q)), for every polynomial of a vector
 static void vec_mul(kron_mul_fn mul, const KronPlan* plan, const poly* c, const poly* v, poly* out, int cnt) {
+  const uint32_t pt = prof_now();
   for (int i = 0; i < cnt; i++) mul(plan, c->coeffs, v[i].coeffs, out[i].coeffs);
+  g_prod_cycles += prof_now() - pt;
 }
 
 static int sign_core(uint8_t* sig, size_t* siglen, const uint8_t* m, size_t mlen, const uint8_t* sk, kron_mul_fn mul, const KronPlan* plan_cs,
@@ -65,8 +67,8 @@ static int sign_core(uint8_t* sig, size_t* siglen, const uint8_t* m, size_t mlen
   shake256(rhoprime, CRHBYTES, key, SEEDBYTES + RNDBYTES + CRHBYTES);
 
   P(polyvec_matrix_expand)(mat, rho);
-  if (ops) { if (ops->begin) ops->begin(ops->ctx, (const int32_t*)s1.vec, (const int32_t*)s2.vec, (const int32_t*)t0.vec); }
-  else if (!mul) { P(polyvecl_ntt)(&s1); P(polyveck_ntt)(&s2); P(polyveck_ntt)(&t0); }
+  if (ops) { if (ops->begin) { const uint32_t pt = prof_now(); ops->begin(ops->ctx, (const int32_t*)s1.vec, (const int32_t*)s2.vec, (const int32_t*)t0.vec); g_prod_cycles += prof_now() - pt; } }
+  else if (!mul) { const uint32_t pt = prof_now(); P(polyvecl_ntt)(&s1); P(polyveck_ntt)(&s2); P(polyveck_ntt)(&t0); g_prod_cycles += prof_now() - pt; }
 
 rej:
   tries++;
@@ -89,24 +91,24 @@ rej:
   shake256_inc_squeeze(sig, CTILDEBYTES, &state);
   shake256_inc_ctx_release(&state);
   P(poly_challenge)(&cp, sig);
-  if (!mul && !ops) P(poly_ntt)(&cp);
+  if (!mul && !ops) { const uint32_t pt = prof_now(); P(poly_ntt)(&cp); g_prod_cycles += prof_now() - pt; }
 
-  if (ops) ops->prod(ops->ctx, cp.coeffs, 0, (int32_t*)z.vec);
-  else if (!mul) { P(polyvecl_pointwise_poly_montgomery)(&z, &cp, &s1); P(polyvecl_invntt_tomont)(&z); }
+  if (ops) { const uint32_t pt = prof_now(); ops->prod(ops->ctx, cp.coeffs, 0, (int32_t*)z.vec); g_prod_cycles += prof_now() - pt; }
+  else if (!mul) { const uint32_t pt = prof_now(); P(polyvecl_pointwise_poly_montgomery)(&z, &cp, &s1); P(polyvecl_invntt_tomont)(&z); g_prod_cycles += prof_now() - pt; }
   else vec_mul(mul, plan_cs, &cp, s1.vec, z.vec, L);
   P(polyvecl_add)(&z, &z, &y);
   P(polyvecl_reduce)(&z);
   if (P(polyvecl_chknorm)(&z, GAMMA1 - BETA)) goto rej;
 
-  if (ops) ops->prod(ops->ctx, cp.coeffs, 1, (int32_t*)h.vec);
-  else if (!mul) { P(polyveck_pointwise_poly_montgomery)(&h, &cp, &s2); P(polyveck_invntt_tomont)(&h); }
+  if (ops) { const uint32_t pt = prof_now(); ops->prod(ops->ctx, cp.coeffs, 1, (int32_t*)h.vec); g_prod_cycles += prof_now() - pt; }
+  else if (!mul) { const uint32_t pt = prof_now(); P(polyveck_pointwise_poly_montgomery)(&h, &cp, &s2); P(polyveck_invntt_tomont)(&h); g_prod_cycles += prof_now() - pt; }
   else vec_mul(mul, plan_cs, &cp, s2.vec, h.vec, K);
   P(polyveck_sub)(&w0, &w0, &h);
   P(polyveck_reduce)(&w0);
   if (P(polyveck_chknorm)(&w0, GAMMA2 - BETA)) goto rej;
 
-  if (ops) ops->prod(ops->ctx, cp.coeffs, 2, (int32_t*)h.vec);
-  else if (!mul) { P(polyveck_pointwise_poly_montgomery)(&h, &cp, &t0); P(polyveck_invntt_tomont)(&h); }
+  if (ops) { const uint32_t pt = prof_now(); ops->prod(ops->ctx, cp.coeffs, 2, (int32_t*)h.vec); g_prod_cycles += prof_now() - pt; }
+  else if (!mul) { const uint32_t pt = prof_now(); P(polyveck_pointwise_poly_montgomery)(&h, &cp, &t0); P(polyveck_invntt_tomont)(&h); g_prod_cycles += prof_now() - pt; }
   else vec_mul(mul, plan_ct0, &cp, t0.vec, h.vec, K);
   P(polyveck_reduce)(&h);
   if (P(polyveck_chknorm)(&h, GAMMA2)) goto rej;

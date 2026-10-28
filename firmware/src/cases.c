@@ -10,3 +10,5 @@ const KronCase KRON_CASES[N_CASES] = {
   {"falcon512_s2_h", 512, 12289u,  -2047,   2047,    0,       12288},
 };
 const CpuPoly* cpu_poly_for_case(int c) { return c <= CASE_MLKEM_FULL ? &CPU_MLKEM : c <= CASE_MLDSA_FULL ? &CPU_MLDSA : &CPU_FALCON; }
+
+uint32_t g_prod_cycles;
