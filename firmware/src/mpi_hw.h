@@ -48,10 +48,10 @@ static inline void load_x(const uint32_t* x, uint32_t xw, uint32_t hw) {
   for (; i < xw; i++) xb[i] = x[i];
   for (; i < hw; i++) xb[i] = 0;
 }
-static inline void load_y(const uint32_t* y, uint32_t yw, uint32_t hw) {
+static inline void load_y(const uint32_t* y, uint32_t yw, uint32_t hw, bool clear_lower = true) {
   volatile uint32_t* zb = (volatile uint32_t*)RSA_MEM_Z_BLOCK_BASE;
   uint32_t i;
-  for (i = 0; i < hw; i++) zb[i] = 0;
+  if (clear_lower) for (i = 0; i < hw; i++) zb[i] = 0;
   for (i = 0; i < yw; i++) zb[hw + i] = y[i];
   for (; i < hw; i++) zb[hw + i] = 0;
 }

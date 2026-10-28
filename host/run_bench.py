@@ -86,7 +86,7 @@ def main():
         r = kv(b.cmd('FAST %s %s %d %d %d' % (kind, case, c, opt, reps), timeout=300)[0]); r['reps_target_s'] = target; out.add('fast_ablation', r); return r
     for case in CASES:                                    # one product: switches alone and together (SHARE / FUSE do not apply to a single product)
         c = fbest[case][1]
-        for opt in (0, 1, 2, 16, 3, 17, 18, 19): fast('single', case, c, opt)
+        for opt in (0, 1, 2, 16, 32, 3, 17, 18, 19, 51): fast("single", case, c, opt)
         out.add('hwonly', kv(b.cmd('HWONLY %s %d 0 %d' % (case, c, 50 if q else 300))[0]))
         out.add('hwonly', kv(b.cmd('HWONLY %s %d 1 %d' % (case, c, 50 if q else 300))[0]))
         # old overlap stage at the same plan, for the comparison with the engine at opt 0

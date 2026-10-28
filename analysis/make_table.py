@@ -10,7 +10,7 @@ STAGES = list(STAGE_LABEL)
 CASE_NOTE = {
     'mlkem_x_cbd': 'ML-KEM-768, u (mod q) x s (CBD2)', 'mlkem_full': 'ML-KEM ring, two arbitrary elements', 'mldsa_c_s': 'ML-DSA-44, c x s1/s2',
     'mldsa_c_t0': 'ML-DSA-44, c x t0', 'mldsa_full': 'ML-DSA-44, y x A (full width)', 'falcon512_s2_h': 'Falcon-512 verify, s2 x h'}
-SWITCH = {1: 'prepack', 2: 'X resident', 4: 'fuse sum', 8: 'share operand', 16: 'fast CPU code'}
+SWITCH = {1: 'prepack', 2: 'X resident', 4: 'fuse sum', 8: 'share operand', 16: 'fast CPU code', 32: 'no Z clear'}
 VARIANT = {'ref': 'PQClean as shipped', 'cpu': 'copy of it, PQClean NTT', 't': 'tuned NTT', 'tc': 'tuned NTT, key transform cached',
            's0': 'MPI: mbedtls API', 's1': 'MPI: + limb I/O', 's2': 'MPI: + direct driver', 's3': 'MPI: + overlap', 'f0': 'MPI engine, no switch', 'f31': 'MPI optimised (all switches)'}
 

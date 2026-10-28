@@ -47,7 +47,7 @@ void fast_mul(const KronPlan* p, const int32_t* const* a, const int32_t* const* 
   auto issue = [&](int s) {
     const int i = s / (T * c), r = s % (T * c), t = r / c, j = r % c; const int xid = t * c + i;
     if (!(xres && xid == lastX)) { mpihw::load_x(FA + xid * hw, hw, hw); lastX = xid; }
-    mpihw::load_y(bptr(t, j), hw, hw); mpihw::start(hw);
+    mpihw::load_y(bptr(t, j), hw, hw, !(opt & OPT_NOCLEAR) || s == 0); mpihw::start(hw);
   };
   need(0); issue(0);
   const void* pbp = nullptr;
@@ -89,7 +89,7 @@ void fast_mul_shared(const KronPlan* p, const int32_t* a, int nb, const int32_t*
   auto issue = [&](int s) {
     const int i = s / (nb * c), r = s % (nb * c), t = r / c, j = r % c;
     if (!(xres && i == lastX)) { mpihw::load_x(FA + i * hw, hw, hw); lastX = i; }
-    mpihw::load_y(bptr(t, j), hw, hw); mpihw::start(hw);
+    mpihw::load_y(bptr(t, j), hw, hw, !(opt & OPT_NOCLEAR) || s == 0); mpihw::start(hw);
   };
   need(0); issue(0);
   const void* pbp[4] = {nullptr, nullptr, nullptr, nullptr};
