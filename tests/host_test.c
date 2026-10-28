@@ -86,7 +86,14 @@ static void test_kem(void) {
     kem_indcpa_dec_ref(m1, ct, sk); kem_indcpa_dec_var(m2, ct, sk, s_std, NULL, NULL); kem_indcpa_dec_var(m3, ct, sk, s_std, kron_mul_sw, &plan);
     CHECK(!memcmp(m1, m2, 32) && !memcmp(m1, m3, 32), "indcpa_dec differs, t=%d", t); n++;
   }
-  printf("ml-kem-768 decaps variants agree on %d ciphertexts (20 valid, 40 corrupted)\n", n);
+  void* tk = tuned_kem_setup(s_std);
+  for (int t = 0; t < 30; t++) {
+    kem_enc(ct, ss1, pk); if (t >= 10) ct[rnd() % KEM_CT] ^= 1u << (rnd() & 7);
+    kem_dec_ref(ss2, ct, sk); kem_dec_fn(ss3, ct, sk, tuned_kem_dot, tk);
+    CHECK(!memcmp(ss2, ss3, 32), "KEM tuned-NTT decapsulation differs, t=%d", t);
+  }
+  tuned_free(tk);
+  printf("ml-kem-768 decaps variants agree on %d ciphertexts (20 valid, 40 corrupted), tuned NTT on 30 more\n", n);
 }
 
 static void test_dsa(void) {
@@ -104,12 +111,22 @@ static void test_dsa(void) {
     CHECK(a2 == a3, "attempt counts differ"); if (a3 > max_att) max_att = a3; tot += a3;
     CHECK(dsa_verify(s3, l3, msg, 1 + t * 2, pk) == 0, "ML-DSA signature does not verify, t=%d", t);
   }
+  { static int32_t S1[1024], S2[1024], T0[1024]; dsa_unpack_secret(sk, S1, S2, T0);
+    for (int cached = 0; cached < 2; cached++) {
+      void* tc = tuned_dsa_setup(cached, S1, S2, T0); dsa_ops ops = { tc, tuned_dsa_begin, tuned_dsa_prod };
+      for (int t = 0; t < 10; t++) {
+        for (int i = 0; i < 64; i++) msg[i] = (uint8_t)rnd(); size_t l1, l2; int a = 0;
+        rb_seed(700 + t); dsa_sign_ref(s1, &l1, msg, 20 + t, sk); rb_seed(700 + t); dsa_sign_ops(s2, &l2, msg, 20 + t, sk, &ops, &a);
+        CHECK(l1 == l2 && !memcmp(s1, s2, l1), "ML-DSA tuned-NTT signature differs (cached=%d t=%d)", cached, t);
+      }
+      tuned_free(tc);
+    } }
   printf("ml-dsa-44 signatures identical for 25 messages (rejection-loop passes: total %d, max %d)\n", tot, max_att);
 }
 
 static void test_falcon(void) {
   static uint8_t pk[FAL_PK], sk[FAL_SK], sig[FAL_SIG + 8]; uint8_t msg[48];
-  KronPlan plan; best_c(&KRON_CASES[CASE_FALCON_H_S2], &plan);
+  KronPlan plan; best_c(&KRON_CASES[CASE_FALCON_S2_H], &plan);
   rb_seed(21); falcon_keypair(pk, sk); int acc = 0, rej = 0;
   for (int t = 0; t < 8; t++) {
     for (int i = 0; i < 48; i++) msg[i] = (uint8_t)rnd();
@@ -123,6 +140,13 @@ static void test_falcon(void) {
     const int d0 = falcon_verify_ref(sig, sl, msg, 48, pk), d1 = falcon_verify_var(sig, sl, msg, 48, pk, NULL, NULL), d2 = falcon_verify_var(sig, sl, msg, 48, pk, kron_mul_sw, &plan);
     CHECK((d0 == 0) == (d1 == 0) && (d0 == 0) == (d2 == 0), "Falcon damaged-signature verdicts differ");
   }
+  { static int32_t H[512]; falcon_decode_h(pk, H);
+    for (int cached = 0; cached < 2; cached++) {
+      void* tc = tuned_fal_setup(cached, H); size_t sl; falcon_sign(sig, &sl, msg, 48, sk);
+      CHECK(falcon_verify_fn(sig, sl, msg, 48, pk, tuned_fal_prod, tc) == 0, "Falcon tuned-NTT verify rejects a valid signature");
+      msg[0] ^= 1; CHECK(falcon_verify_fn(sig, sl, msg, 48, pk, tuned_fal_prod, tc) != 0, "Falcon tuned-NTT verify accepts a tampered message"); msg[0] ^= 1;
+      tuned_free(tc);
+    } }
   printf("falcon-512: %d valid signatures accepted, %d tampered messages rejected, all three verifiers agree\n", acc, rej);
 }
 

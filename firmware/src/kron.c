@@ -73,6 +73,12 @@ void kron_prefix(const KronPlan* p, const int32_t* a, const int32_t* b, void* pa
   }
 }
 
+void kron_prefix1(const KronPlan* p, const int32_t* v, void* pre) {
+  const int n = p->n;
+  if (p->narrow) { int32_t* r = (int32_t*)pre; int32_t s = 0; r[0] = 0; for (int i = 0; i < n; i++) { s += v[i]; r[i + 1] = s; } }
+  else { int64_t* r = (int64_t*)pre; int64_t s = 0; r[0] = 0; for (int i = 0; i < n; i++) { s += v[i]; r[i + 1] = s; } }
+}
+
 static inline int32_t red64(int64_t d, uint32_t q) {
   int32_t r;
   if (d >= INT32_MIN && d <= INT32_MAX) r = (int32_t)d % (int32_t)q;

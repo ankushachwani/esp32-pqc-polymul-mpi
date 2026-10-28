@@ -14,3 +14,7 @@ bool stage_needs_hw(int stage);
 struct Prof { uint32_t pack, prefix, load, compute, read, accum, finish; };   // CPU cycles, S_DRIVER only
 extern Prof g_prof;
 void polymul_driver_profiled(const KronPlan* p, const int32_t* a, const int32_t* b, int32_t* out);
+
+extern uint32_t g_A[], g_B[], g_zbuf[2][KRON_ZWORDS];
+extern uint64_t g_acc[];
+extern int64_t g_pa[], g_pb[];

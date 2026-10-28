@@ -6,6 +6,9 @@
 //   CHECK <case> <c> <stage> <nvec>         bit-exactness of a stage against the O(n^2) reference on random and extreme vectors
 //   CHECKCPU <case> <nvec>                  same for the NTT baseline
 //   BENCH <case> <c> <stage> <reps>         latency of one polynomial product; stage 0..3 = S_MBEDTLS..S_OVERLAP, 4 = NTT full, 5 = NTT with operand a pre-transformed, 6/7 = the same with the tuned NTT
+//   FAST <kind> <case> <c> <opt> <reps>     optimised path (polymul_fast.cpp); kind single | sum (3 terms, ML-KEM decrypt shape) | shared (4 products with a common operand);
+//                                           opt = sum of OPT_PREPACK 1, OPT_XRES 2, OPT_FUSE 4, OPT_SHARE 8; bit-exact check before the timing
+//   HWONLY <case> <c> <xres> <reps>         only the unit's work for a plan (load, start, wait, read) with no CPU work: the floor for that plan
 //   PROF <case> <c> <reps>                  where the time goes in S_DRIVER
 //   COMP <case> <reps>                      NTT parts: forward, pointwise, inverse
 //   HWLAT                                   multiplier cost per operand size: mbedtls vs driver, load / compute / read, and sizes beyond 2048 bits through mbedtls
@@ -27,6 +30,7 @@
 #include "kron.h"
 #include "schemes.h"
 #include "polymul_hw.h"
+#include "polymul_fast.h"
 
 extern "C" void rb_seed(uint64_t s);
 static const double MHZ = 240.0;
@@ -51,6 +55,8 @@ static int get_plan(int ci, int c, KronPlan* p) {
   return 0;
 }
 
+static int32_t* g_vec;                                           // 4 x 512 scratch for the check commands (heap: the static DRAM segment is full)
+static void vec_init() { if (!g_vec) g_vec = (int32_t*)malloc(4 * 512 * 4); }
 static int32_t (*va)[512], (*vb)[512];                              // on the heap: the static DRAM segment is too small for them
 static void make_pool(int ci) {
   const KronCase& k = KRON_CASES[ci];
@@ -66,7 +72,7 @@ static void cmd_plan(int ci, int c) {
 
 static void cmd_check(int ci, int c, int stage, int nvec) {
   KronPlan p; if (get_plan(ci, c, &p)) return;
-  const KronCase& k = KRON_CASES[ci]; static int32_t a[512], b[512], ref[512], got[512];
+  const KronCase& k = KRON_CASES[ci]; vec_init(); int32_t *a = g_vec, *b = g_vec + 512, *ref = g_vec + 1024, *got = g_vec + 1536;
   hw_for_stage(stage); kron_mul_fn f = polymul_for_stage(stage); int bad = 0, tot = 0;
   for (int t = 0; t < nvec + 16; t++) {
     int ma = 0, mb = 0; if (t >= nvec) { ma = 1 + (t - nvec) % 4; mb = 1 + (t - nvec) / 4 % 4; }          // 16 extreme-value pairs after the random ones
@@ -78,7 +84,7 @@ static void cmd_check(int ci, int c, int stage, int nvec) {
 }
 
 static void cmd_checkcpu(int ci, int nvec) {
-  const KronCase& k = KRON_CASES[ci]; static int32_t a[512], b[512], ref[512], got[512];
+  const KronCase& k = KRON_CASES[ci]; vec_init(); int32_t *a = g_vec, *b = g_vec + 512, *ref = g_vec + 1024, *got = g_vec + 1536;
   for (int impl = 0; impl < 2; impl++) {
     const CpuPoly* cp = impl ? cpu_tuned_for_case(ci) : cpu_poly_for_case(ci); int bad = 0, tot = 0;
     rs = 0x2545F491 + impl * 0;                                   // same vectors for both implementations
@@ -158,6 +164,81 @@ static void cmd_comp(int ci, int reps) {
     t0 = cyc(); ct->pre(); tq += cyc() - t0;
   }
   Serial.printf("CT case=%s reps=%d ntt_us=%.2f pointwise_us=%.2f intt_us=%.2f full_us=%.2f pre_us=%.2f\n", k.name, reps, tn * f, tp * f, ti * f, tf * f, tq * f);
+}
+
+// ---------------------------------------------------------------- optimised path
+static int32_t* g_out;
+static void sum_mod(int32_t* acc, const int32_t* v, int n, uint32_t q) { for (int i = 0; i < n; i++) { int32_t x = acc[i] + v[i]; if (x >= (int32_t)q) x -= q; acc[i] = x; } }
+
+// fill a (or b) of one trial; mode 0 random, 1..3 extreme patterns
+static void cmd_fast(const char* kind, int ci, int c, int opt, int reps) {
+  const KronCase& k = KRON_CASES[ci]; const int n = k.n; vec_init(); make_pool(ci);
+  if (!g_out) g_out = (int32_t*)malloc(8 * 512 * 4);
+  int32_t* out = g_out; int32_t* ref = g_out + 4 * 512; int32_t* tmp = g_vec + 1536;
+  hw_on(); Stats st; int bad = 0, checks = 0;
+  const bool single = !strcmp(kind, "single"), sum = !strcmp(kind, "sum"), shared = !strcmp(kind, "shared");
+  if (!single && !sum && !shared) { Serial.println("ERR kind"); return; }
+  const int T = sum ? 3 : 1, NB = shared ? 4 : 1;
+  KronPlan pT, p1; if (kron_plan_terms(&k, c, T, &pT) || kron_plan(&k, c, &p1)) { Serial.println("ERR plan infeasible"); return; }
+  if (shared && !pT.narrow) { Serial.println("ERR shared needs a narrow plan"); return; }
+  // fixed operands
+  int32_t* fixb = (int32_t*)malloc(4 * 512 * 4);                       // the fixed b vectors (secret-like)
+  const Packed* pk1[4] = {0, 0, 0, 0}; const Packed* pkT[4] = {0, 0, 0, 0}; void* presum = nullptr;
+  auto build_fixed = [&](int32_t* const* bsrc) {
+    for (int t = 0; t < 4; t++) { packed_free((Packed*)pk1[t]); packed_free((Packed*)pkT[t]); pk1[t] = pkT[t] = nullptr; }
+    free(presum); presum = nullptr;
+    const int nf = sum ? 3 : shared ? 4 : 1;
+    for (int t = 0; t < nf; t++) { pk1[t] = packed_new(&p1, bsrc[t]); if (sum) pkT[t] = packed_new(&pT, bsrc[t]); }
+    if (sum) presum = prefix_sum_new(&pT, (const int32_t* const*)bsrc, 3);
+  };
+  auto run = [&](int32_t* const* as, int32_t* const* bs, uint32_t o) {
+    if (single) { const int32_t* aa[1] = {as[0]}; const int32_t* bb[1] = {bs[0]}; const Packed* ff[1] = {pk1[0]}; fast_mul(&p1, aa, bb, ff, nullptr, out, o); }
+    else if (sum) {
+      if (o & OPT_FUSE) fast_mul(&pT, (const int32_t* const*)as, (const int32_t* const*)bs, pkT, presum, out, o);
+      else fast_sum_unfused(&p1, 3, (const int32_t* const*)as, (const int32_t* const*)bs, pk1, out, o);
+    } else { int32_t* oo[4] = {out, out + 512, out + 1024, out + 1536}; fast_mul_shared(&p1, as[0], 4, (const int32_t* const*)bs, pk1, oo, o); }
+  };
+  auto reference = [&](int32_t* const* as, int32_t* const* bs) {
+    if (single) kron_ref_negacyclic(n, k.q, as[0], bs[0], ref);
+    else if (sum) { memset(ref, 0, n * 4); for (int t = 0; t < 3; t++) { kron_ref_negacyclic(n, k.q, as[t], bs[t], tmp); sum_mod(ref, tmp, n, k.q); } }
+    else for (int t = 0; t < 4; t++) kron_ref_negacyclic(n, k.q, as[0], bs[t], ref + t * 512);
+  };
+  auto same = [&]() { if (single || sum) return !memcmp(out, ref, n * 4); for (int t = 0; t < 4; t++) if (memcmp(out + t * 512, ref + t * 512, n * 4)) return false; return true; };
+  // bit-exactness: random and extreme operands, fresh fixed operands for each trial
+  int32_t* av[4]; int32_t* bv[4]; static int32_t* trial = nullptr; if (!trial) trial = (int32_t*)malloc(8 * 512 * 4);
+  for (int t = 0; t < 24; t++) {
+    const int mode = t < 12 ? 0 : 1 + (t - 12) % 3, modeb = t < 12 ? 0 : 1 + (t - 12) / 4 % 3;
+    for (int u = 0; u < 4; u++) { av[u] = trial + u * 512; bv[u] = fixb + u * 512; fillvec(av[u], n, k.amin, k.amax, mode); fillvec(bv[u], n, k.bmin, k.bmax, modeb); }
+    build_fixed(bv); reference(av, bv); run(av, bv, opt); checks++; if (!same()) bad++;
+  }
+  // timing: fixed operands as in the real use (built once), varying operand rotates over the pool
+  for (int u = 0; u < 4; u++) { bv[u] = fixb + u * 512; memcpy(bv[u], vb[u], n * 4); }
+  build_fixed(bv);
+  int32_t* arot[4];
+  for (int u = 0; u < 4; u++) arot[u] = va[u];
+  run(arot, bv, opt);
+  for (int r = 0; r < reps; r++) {
+    for (int u = 0; u < 4; u++) arot[u] = va[(r + u) & 3];
+    const uint32_t t0 = cyc(); run(arot, bv, opt); st.add(cyc() - t0);
+  }
+  Serial.printf("F kind=%s case=%s c=%d opt=%d reps=%d mean_us=%.2f min_us=%.2f max_us=%.2f std_us=%.2f checks=%d bad=%d\n", kind, k.name, c, opt, reps, st.mean(), st.mn, st.mx, st.sd(), checks, bad);
+  for (int t = 0; t < 4; t++) { packed_free((Packed*)pk1[t]); packed_free((Packed*)pkT[t]); } free(presum); free(fixb);
+}
+
+static void cmd_hwonly(int ci, int c, int xres, int reps) {
+  KronPlan p; if (get_plan(ci, c, &p)) return;
+  const uint32_t hw = p.hw; static uint32_t* x = nullptr; if (!x) x = (uint32_t*)malloc(2 * 64 * 4);
+  for (uint32_t i = 0; i < hw; i++) { x[i] = rnd() & 0x7fffffff; x[64 + i] = rnd() & 0x7fffffff; }
+  hw_on(); static uint32_t z[KRON_ZWORDS]; Stats st;
+  for (int r = -1; r < reps; r++) {
+    const uint32_t t0 = cyc();
+    for (int i = 0; i < p.c; i++) for (int j = 0; j < p.c; j++) {
+      if (!(xres && j > 0)) mpihw::load_x(x, hw, hw);
+      mpihw::load_y(x + 64, hw, hw); mpihw::start(hw); mpihw::wait(); mpihw::read_z_fast(z, 2 * hw);
+    }
+    if (r >= 0) st.add(cyc() - t0);
+  }
+  Serial.printf("W case=%s c=%d xres=%d reps=%d mean_us=%.2f min_us=%.2f max_us=%.2f multiplies=%d\n", KRON_CASES[ci].name, c, xres, reps, st.mean(), st.mn, st.mx, p.c * p.c);
 }
 
 static uint32_t sw_a[96], sw_b[96], sw_ref[200], sw_z[200];
@@ -289,7 +370,7 @@ static void e2e_falcon(const char* op, const char* var, int reps, int c1) {
     for (int r = 0; r < reps; r++) { rb_seed(900 + (r & 3)); const uint32_t t0 = cyc(); falcon_sign(sg, &sl, fmsg[r & 3], 48, fsk); st.add(cyc() - t0); }
     report("falcon512", op, var, reps, st, 1, ""); return;
   }
-  KronPlan p; if (v >= 0) { if (get_plan(CASE_FALCON_H_S2, c1, &p)) return; hw_for_stage(v); } else hw_off();
+  KronPlan p; if (v >= 0) { if (get_plan(CASE_FALCON_S2_H, c1, &p)) return; hw_for_stage(v); } else hw_off();
   kron_mul_fn f = v >= 0 ? polymul_for_stage(v) : nullptr;
   for (int r = 0; r < reps; r++) {
     const int i = r & 3; uint8_t m[48]; memcpy(m, fmsg[i], 48); const bool tamper = r & 4; if (tamper) m[r % 48] ^= 1;     // half of the runs verify a tampered message (must reject)
@@ -314,6 +395,8 @@ static void handle(char* line) {
   else if (!strcmp(cmd, "CHECK") && a[3]) cmd_check(find_case(a[0]), I(1), I(2), I(3));
   else if (!strcmp(cmd, "CHECKCPU") && a[1]) cmd_checkcpu(find_case(a[0]), I(1));
   else if (!strcmp(cmd, "BENCH") && a[3]) { const int ci = find_case(a[0]); if (ci < 0) Serial.println("ERR case"); else cmd_bench(ci, I(1), I(2), I(3)); }
+  else if (!strcmp(cmd, "FAST") && a[4]) { const int ci = find_case(a[1]); if (ci < 0) Serial.println("ERR case"); else cmd_fast(a[0], ci, I(2), I(3), I(4)); }
+  else if (!strcmp(cmd, "HWONLY") && a[3]) { const int ci = find_case(a[0]); if (ci < 0) Serial.println("ERR case"); else cmd_hwonly(ci, I(1), I(2), I(3)); }
   else if (!strcmp(cmd, "PROF") && a[2]) cmd_prof(find_case(a[0]), I(1), I(2));
   else if (!strcmp(cmd, "COMP") && a[1]) { const int ci = find_case(a[0]); if (ci < 0) Serial.println("ERR case"); else cmd_comp(ci, I(1)); }
   else if (!strcmp(cmd, "HWLAT")) cmd_hwlat();

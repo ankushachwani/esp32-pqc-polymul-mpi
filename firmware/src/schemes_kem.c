@@ -14,16 +14,16 @@
 #define P(x) PQCLEAN_MLKEM768_CLEAN_##x
 
 // ---- one-product baselines
-static poly ka, kb, kah, kw, kr;
+static poly ka, kb, kbh, kw, kr;
 static void kem_load(const int32_t* a, const int32_t* b) {
   for (int i = 0; i < KYBER_N; i++) { ka.coeffs[i] = (int16_t)a[i]; kb.coeffs[i] = (int16_t)b[i]; }
-  kah = ka; P(poly_ntt)(&kah);
+  kbh = kb; P(poly_ntt)(&kbh);
 }
 static void kem_full(void) { poly x = ka, y = kb; P(poly_ntt)(&x); P(poly_ntt)(&y); P(poly_basemul_montgomery)(&kr, &x, &y); P(poly_invntt_tomont)(&kr); P(poly_reduce)(&kr); }
-static void kem_pre(void) { poly y = kb; P(poly_ntt)(&y); P(poly_basemul_montgomery)(&kr, &kah, &y); P(poly_invntt_tomont)(&kr); P(poly_reduce)(&kr); }
+static void kem_pre(void) { poly y = ka; P(poly_ntt)(&y); P(poly_basemul_montgomery)(&kr, &y, &kbh); P(poly_invntt_tomont)(&kr); P(poly_reduce)(&kr); }
 static void kem_get(int32_t* out) { for (int i = 0; i < KYBER_N; i++) { int32_t v = kr.coeffs[i]; out[i] = v < 0 ? v + KYBER_Q : v; } }
 static void kem_ntt(void) { kw = ka; P(poly_ntt)(&kw); }
-static void kem_pw(void) { P(poly_basemul_montgomery)(&kr, &kah, &kb); }
+static void kem_pw(void) { P(poly_basemul_montgomery)(&kr, &kbh, &kb); }
 static void kem_intt(void) { kw = kr; P(poly_invntt_tomont)(&kw); }
 const CpuPoly CPU_MLKEM = { kem_load, kem_full, kem_pre, kem_get, kem_ntt, kem_pw, kem_intt };
 
@@ -69,6 +69,31 @@ int kem_dec_var(uint8_t* ss, const uint8_t* ct, const uint8_t* sk, const int32_t
   uint8_t buf[2 * KYBER_SYMBYTES], kr2[2 * KYBER_SYMBYTES], cmp[KYBER_CIPHERTEXTBYTES + KYBER_SYMBYTES];
   const uint8_t* pk = sk + KYBER_INDCPA_SECRETKEYBYTES;
   kem_indcpa_dec_var(buf, ct, sk, s_std, mul, plan);
+  memcpy(buf + KYBER_SYMBYTES, sk + KYBER_SECRETKEYBYTES - 2 * KYBER_SYMBYTES, KYBER_SYMBYTES);
+  hash_g(kr2, buf, 2 * KYBER_SYMBYTES);
+  P(indcpa_enc)(cmp, buf, pk, kr2 + KYBER_SYMBYTES);
+  const int fail = P(verify)(ct, cmp, KYBER_CIPHERTEXTBYTES);
+  rkprf(ss, sk + KYBER_SECRETKEYBYTES - KYBER_SYMBYTES, ct);
+  P(cmov)(ss, kr2, KYBER_SYMBYTES, (uint8_t)(1 - fail));
+  return 0;
+}
+
+void kem_indcpa_dec_fn(uint8_t* m, const uint8_t* ct, kem_dot_fn dot, void* ctx) {
+  polyvec b; poly v, mp; int32_t u[KYBER_K * KYBER_N], t[KYBER_N];
+  P(polyvec_decompress)(&b, ct);
+  P(poly_decompress)(&v, ct + KYBER_POLYVECCOMPRESSEDBYTES);
+  for (int i = 0; i < KYBER_K; i++) for (int j = 0; j < KYBER_N; j++) u[i * KYBER_N + j] = b.vec[i].coeffs[j];
+  dot(ctx, u, t);
+  for (int j = 0; j < KYBER_N; j++) mp.coeffs[j] = (int16_t)t[j];
+  P(poly_sub)(&mp, &v, &mp);
+  P(poly_reduce)(&mp);
+  P(poly_tomsg)(m, &mp);
+}
+
+int kem_dec_fn(uint8_t* ss, const uint8_t* ct, const uint8_t* sk, kem_dot_fn dot, void* ctx) {
+  uint8_t buf[2 * KYBER_SYMBYTES], kr2[2 * KYBER_SYMBYTES], cmp[KYBER_CIPHERTEXTBYTES + KYBER_SYMBYTES];
+  const uint8_t* pk = sk + KYBER_INDCPA_SECRETKEYBYTES;
+  kem_indcpa_dec_fn(buf, ct, dot, ctx);
   memcpy(buf + KYBER_SYMBYTES, sk + KYBER_SECRETKEYBYTES - 2 * KYBER_SYMBYTES, KYBER_SYMBYTES);
   hash_g(kr2, buf, 2 * KYBER_SYMBYTES);
   P(indcpa_enc)(cmp, buf, pk, kr2 + KYBER_SYMBYTES);

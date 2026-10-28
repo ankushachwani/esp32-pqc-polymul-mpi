@@ -8,10 +8,16 @@ const char* const STAGE_NAME[N_STAGES] = {"mbedtls_api", "limb_io", "direct_driv
 bool stage_needs_hw(int s) { return s >= S_DRIVER; }
 Prof g_prof;
 
-static uint32_t A[KRON_MAX_CHUNKS * KRON_MAX_WORDS], B[KRON_MAX_CHUNKS * KRON_MAX_WORDS];
-static uint32_t zbuf[2][KRON_ZWORDS];
-static uint64_t acc[KRON_MAX_ACC];
-static int64_t pa[513], pb[513];
+uint32_t g_A[KRON_MAX_CHUNKS * KRON_MAX_WORDS], g_B[KRON_MAX_CHUNKS * KRON_MAX_WORDS];      // scratch shared with polymul_fast.cpp (never used at the same time)
+uint32_t g_zbuf[2][KRON_ZWORDS];
+uint64_t g_acc[KRON_MAX_ACC];
+int64_t g_pa[KRON_MAX_N + 1], g_pb[KRON_MAX_N + 1];
+#define A g_A
+#define B g_B
+#define zbuf g_zbuf
+#define acc g_acc
+#define pa g_pa
+#define pb g_pb
 
 static inline uint32_t cyc() { return ESP.getCycleCount(); }
 

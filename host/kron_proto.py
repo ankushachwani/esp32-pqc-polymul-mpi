@@ -26,8 +26,8 @@ CASES = {
     'mlkem_full':     dict(n=256, q=3329,    a=(0, 3328),      b=(0, 3328),        note='ML-KEM ring, two arbitrary elements (not a step the scheme does in coefficient form)'),
     'mldsa_c_s':      dict(n=256, q=8380417, a=(-1, 1),        b=(-2, 2),          note='ML-DSA-44: challenge c (+-1) times s1 or s2 (eta=2)'),
     'mldsa_c_t0':     dict(n=256, q=8380417, a=(-1, 1),        b=(-4095, 4096),    note='ML-DSA-44: challenge c times t0 (13-bit signed)'),
-    'mldsa_full':     dict(n=256, q=8380417, a=(0, 8380416),   b=(-131071, 131072), note='ML-DSA-44: A (uniform mod q) times y or z (gamma1 = 2^17)'),
-    'falcon512_h_s2': dict(n=512, q=12289,   a=(0, 12288),     b=(-2047, 2047),    note='Falcon-512 verify: public key h times signature s2'),
+    'mldsa_full':     dict(n=256, q=8380417, a=(-131071, 131072), b=(0, 8380416),  note='ML-DSA-44: y or z (gamma1 = 2^17) times A (uniform mod q, fixed)'),
+    'falcon512_s2_h': dict(n=512, q=12289,   a=(-2047, 2047),   b=(0, 12288),       note='Falcon-512 verify: signature s2 times public key h (fixed)'),
 }
 
 

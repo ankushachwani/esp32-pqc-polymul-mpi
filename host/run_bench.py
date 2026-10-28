@@ -9,7 +9,7 @@ feasible plan at every stage; stage-2 time breakdown; NTT parts; whole-scheme op
 import argparse, csv, os, sys, time
 from board import Board, kv
 
-CASES = ['mlkem_x_cbd', 'mlkem_full', 'mldsa_c_s', 'mldsa_c_t0', 'mldsa_full', 'falcon512_h_s2']
+CASES = ['mlkem_x_cbd', 'mlkem_full', 'mldsa_c_s', 'mldsa_c_t0', 'mldsa_full', 'falcon512_s2_h']
 STAGES = [0, 1, 2, 3]
 
 
@@ -85,7 +85,7 @@ def main():
     for st in STAGES: e2e('E2E dsa sign s%d %d %d %d' % (st, e_reps['dsa'], plan_for('mldsa_c_s', st), plan_for('mldsa_c_t0', st)))
     e2e('E2E falcon sign ref %d' % 8)
     for var in ('ref', 'cpu'): e2e('E2E falcon verify %s %d' % (var, e_reps['falcon']))
-    for st in STAGES: e2e('E2E falcon verify s%d %d %d' % (st, e_reps['falcon'], plan_for('falcon512_h_s2', st)))
+    for st in STAGES: e2e('E2E falcon verify s%d %d %d' % (st, e_reps['falcon'], plan_for('falcon512_s2_h', st)))
     out.flush(); log('done')
     bad = [r for r in out.rows['check'] + out.rows['check_cpu'] if r.get('bad')] + [r for r in out.rows['e2e'] if r.get('ok') != 1]
     if bad: log('MISMATCHES:', bad); return 1

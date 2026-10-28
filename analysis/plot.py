@@ -17,8 +17,8 @@ plt.rcParams.update({'font.size': 9, 'axes.edgecolor': INK, 'axes.labelcolor': I
 
 def fig_latency():
     pm = pd.read_csv(os.path.join(T, 'polymul_latency.csv'))
-    labels = ['NTT full', 'NTT, a pre-transformed', 'mbedtls API', '+ limb I/O', '+ direct driver', '+ overlap']
-    cols = ['NTT full (us)', 'NTT, a pre-transformed (us)', 'mbedtls API (us)', '+ limb I/O (us)', '+ direct driver (us)', '+ overlap (us)']
+    labels = ['NTT full', 'NTT, fixed operand pre-transformed', 'mbedtls API', '+ limb I/O', '+ direct driver', '+ overlap']
+    cols = ['NTT full (us)', 'NTT, fixed operand pre-transformed (us)', 'mbedtls API (us)', '+ limb I/O (us)', '+ direct driver (us)', '+ overlap (us)']
     colors = [C_NTT, C_NTT2] + C_STAGE
     fig, ax = plt.subplots(figsize=(8.2, 3.6)); x = np.arange(len(pm)); w = 0.13
     for i, (c, lab, col) in enumerate(zip(cols, labels, colors)):

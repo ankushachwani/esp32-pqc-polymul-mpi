@@ -43,6 +43,8 @@ uint32_t kron_acc_bytes(const KronPlan* p);
 void kron_accum(const KronPlan* p, const uint32_t* z, int ci, int cj, void* acc);
 // prefix sums of a and b that kron_finish needs (a's only if the b shift is non-zero and vice versa): pre[0] = 0, pre[i+1] = pre[i] + v[i]
 void kron_prefix(const KronPlan* p, const int32_t* a, const int32_t* b, void* pa, void* pb);
+// prefix sums of one vector
+void kron_prefix1(const KronPlan* p, const int32_t* v, void* pre);
 // remove the shifts, fold x^n = -1, reduce mod q into [0, q)
 void kron_finish(const KronPlan* p, const void* acc, const void* pa, const void* pb, int32_t* out);
 

@@ -9,7 +9,7 @@ STAGE_LABEL = {'mbedtls_api': 'mbedtls API', 'limb_io': '+ limb I/O', 'direct_dr
 STAGES = list(STAGE_LABEL)
 CASE_NOTE = {
     'mlkem_x_cbd': 'ML-KEM-768, u (mod q) x s (CBD2)', 'mlkem_full': 'ML-KEM ring, two arbitrary elements', 'mldsa_c_s': 'ML-DSA-44, c x s1/s2',
-    'mldsa_c_t0': 'ML-DSA-44, c x t0', 'mldsa_full': 'ML-DSA-44, A x y (full width)', 'falcon512_h_s2': 'Falcon-512 verify, h x s2'}
+    'mldsa_c_t0': 'ML-DSA-44, c x t0', 'mldsa_full': 'ML-DSA-44, y x A (full width)', 'falcon512_s2_h': 'Falcon-512 verify, s2 x h'}
 
 
 def rd(name): return pd.read_csv(os.path.join(RAW, name + '.csv'))
@@ -37,7 +37,7 @@ def main():
     for case in CASE_NOTE:
         s = sweep[sweep.case == case]
         ntt_full = s[s.stage == 'ntt_full'].iloc[0]; ntt_pre = s[s.stage == 'ntt_pre'].iloc[0]
-        row = {'case': case, 'what': CASE_NOTE[case], 'NTT full (us)': ntt_full.mean_us, 'NTT, a pre-transformed (us)': ntt_pre.mean_us}
+        row = {'case': case, 'what': CASE_NOTE[case], 'NTT full (us)': ntt_full.mean_us, 'NTT, fixed operand pre-transformed (us)': ntt_pre.mean_us}
         for st in STAGES:
             t = s[s.stage == st]; r = t.loc[t.mean_us.idxmin()]
             row['%s (us)' % STAGE_LABEL[st]] = r.mean_us; row['%s plan' % STAGE_LABEL[st]] = '%d chunks, %d mults' % (r.c, r.multiplies)
@@ -48,7 +48,7 @@ def main():
         c = chk[chk.case == case]; row['vectors checked (all plans, stages)'] = int(c.vectors.sum()); row['mismatches'] = int(c.bad.sum()) + int(chkcpu[chkcpu.case == case].bad.sum())
         rows.append(row)
     pm = pd.DataFrame(rows); pm.to_csv(os.path.join(OUT, 'polymul_latency.csv'), index=False)
-    short = pm[['case', 'NTT full (us)', 'NTT, a pre-transformed (us)'] + ['%s (us)' % STAGE_LABEL[s] for s in STAGES] + ['overlap / NTT full', 'overlap / NTT pre', 'S0 -> S3 speedup', 'mismatches']]
+    short = pm[['case', 'NTT full (us)', 'NTT, fixed operand pre-transformed (us)'] + ['%s (us)' % STAGE_LABEL[s] for s in STAGES] + ['overlap / NTT full', 'overlap / NTT pre', 'S0 -> S3 speedup', 'mismatches']]
     md(short, os.path.join(OUT, 'polymul_latency.md'))
 
     # --- where the time goes at the direct-driver stage

@@ -41,6 +41,20 @@ static inline void load(const uint32_t* x, uint32_t xw, const uint32_t* y, uint3
   for (i = 0; i < yw; i++) zb[hw + i] = y[i];
   for (; i < hw; i++) zb[hw + i] = 0;
 }
+// The two halves of load(): X alone, and Y with the Z-block clearing. A sequence of products that share X only needs the first once.
+static inline void load_x(const uint32_t* x, uint32_t xw, uint32_t hw) {
+  volatile uint32_t* xb = (volatile uint32_t*)RSA_MEM_X_BLOCK_BASE;
+  uint32_t i = 0;
+  for (; i < xw; i++) xb[i] = x[i];
+  for (; i < hw; i++) xb[i] = 0;
+}
+static inline void load_y(const uint32_t* y, uint32_t yw, uint32_t hw) {
+  volatile uint32_t* zb = (volatile uint32_t*)RSA_MEM_Z_BLOCK_BASE;
+  uint32_t i;
+  for (i = 0; i < hw; i++) zb[i] = 0;
+  for (i = 0; i < yw; i++) zb[hw + i] = y[i];
+  for (; i < hw; i++) zb[hw + i] = 0;
+}
 static inline void start(uint32_t hw) {
   DPORT_REG_WRITE(RSA_M_DASH_REG, 0);
   DPORT_REG_WRITE(RSA_MULT_MODE_REG, ((hw * 2) / 16) + 7);       // number of 512-bit blocks of the result, plus 7
@@ -59,6 +73,13 @@ static inline void read_z_fast(uint32_t* z, uint32_t zw) {
   uint32_t i = 0;
   for (; i + 4 <= zw; i += 4) { const uint32_t a = p[i], b = p[i + 1], c = p[i + 2], d = p[i + 3]; z[i] = a; z[i + 1] = b; z[i + 2] = c; z[i + 3] = d; }
   for (; i < zw; i++) z[i] = p[i];
+}
+
+// z += product, as one multi-word integer addition (the slots are wide enough that the sum never carries between slots, so this is a slot-wise sum)
+static inline void read_z_add(uint32_t* z, uint32_t zw) {
+  const volatile uint32_t* p = (const volatile uint32_t*)RSA_MEM_Z_BLOCK_BASE;
+  uint32_t carry = 0;
+  for (uint32_t i = 0; i < zw; i++) { const uint32_t v = p[i], s = z[i] + v, c1 = s < v, s2 = s + carry; carry = c1 | (s2 < carry); z[i] = s2; }
 }
 
 }  // namespace mpihw

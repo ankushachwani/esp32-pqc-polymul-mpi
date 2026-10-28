@@ -10,10 +10,10 @@
 #define LOGN 9
 #define FN 512
 
-// ---- one-product baseline (h_std, h_ntt = NTT(h) in Montgomery form, s2 reduced to [0, q))
+// ---- one-product baseline (a = s2, b = h; h_ntt = NTT(h) in Montgomery form, s2 reduced to [0, q))
 static uint16_t fh[FN], fhn[FN], fs[FN], fr[FN], fw[FN];
 static void fal_load(const int32_t* a, const int32_t* b) {
-  for (int i = 0; i < FN; i++) { fh[i] = (uint16_t)a[i]; int32_t s = b[i]; fs[i] = (uint16_t)(s < 0 ? s + Q : s); }
+  for (int i = 0; i < FN; i++) { fh[i] = (uint16_t)b[i]; int32_t s = a[i]; fs[i] = (uint16_t)(s < 0 ? s + Q : s); }
   memcpy(fhn, fh, sizeof fh); FP(to_ntt_monty)(fhn, LOGN);
 }
 static void fal_full(void) {
@@ -57,10 +57,45 @@ int falcon_verify_var(const uint8_t* sig, size_t siglen, const uint8_t* m, size_
   // -s1 = h*s2 - c0 mod q, normalised to [-q/2, q/2], then the same norm test
   int32_t a[FN], b[FN], prod[FN];
   int16_t s1[FN];
-  for (int i = 0; i < FN; i++) { a[i] = h[i]; b[i] = s2[i]; }
+  for (int i = 0; i < FN; i++) { a[i] = s2[i]; b[i] = h[i]; }
   mul(plan, a, b, prod);
   for (int i = 0; i < FN; i++) {
     int32_t w = prod[i] - (int32_t)hm[i];
+    if (w < 0) w += Q;
+    if (w > (Q >> 1)) w -= Q;
+    s1[i] = (int16_t)w;
+  }
+  return FP(is_short)(s1, s2, LOGN) ? 0 : -1;
+}
+
+void falcon_decode_h(const uint8_t* pk, int32_t* h) {
+  uint16_t hh[FN]; FP(modq_decode)(hh, LOGN, pk + 1, FAL_PK - 1);
+  for (int i = 0; i < FN; i++) h[i] = hh[i];
+}
+
+int falcon_verify_fn(const uint8_t* sig, size_t siglen, const uint8_t* m, size_t mlen, const uint8_t* pk, fal_prod_fn prod, void* ctx) {
+  union { uint8_t b[2 * FN]; uint64_t u64; } tmp;
+  uint16_t h[FN], hm[FN];
+  int16_t s2[FN];
+  inner_shake256_context sc;
+  if (siglen < 1 + NONCELEN || sig[0] != 0x30 + 9) return -1;
+  const uint8_t* nonce = sig + 1; const uint8_t* sigbuf = sig + 1 + NONCELEN; const size_t sigbuflen = siglen - 1 - NONCELEN;
+  if (pk[0] != 0x00 + 9) return -1;
+  if (FP(modq_decode)(h, LOGN, pk + 1, FAL_PK - 1) != FAL_PK - 1) return -1;
+  if (sigbuflen == 0) return -1;
+  if (FP(comp_decode)(s2, LOGN, sigbuf, sigbuflen) != sigbuflen) return -1;
+  inner_shake256_init(&sc);
+  inner_shake256_inject(&sc, nonce, NONCELEN);
+  inner_shake256_inject(&sc, m, mlen);
+  inner_shake256_flip(&sc);
+  FP(hash_to_point_ct)(&sc, hm, LOGN, tmp.b);
+  inner_shake256_ctx_release(&sc);
+  int32_t a[FN], b[FN], pr[FN];
+  int16_t s1[FN];
+  for (int i = 0; i < FN; i++) { a[i] = h[i]; b[i] = s2[i]; }
+  prod(ctx, a, b, pr);
+  for (int i = 0; i < FN; i++) {
+    int32_t w = pr[i] - (int32_t)hm[i];
     if (w < 0) w += Q;
     if (w > (Q >> 1)) w -= Q;
     s1[i] = (int16_t)w;
