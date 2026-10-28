@@ -1,0 +1,2 @@
+tag,model,rev,cores,cpu_mhz,heap_free,heap_largest,sdk
+CHIP,ESP32-D0WD-V3,3,2,240,160292,26612,v4.4.7-dirty

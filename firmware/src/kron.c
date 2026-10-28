@@ -90,6 +90,7 @@ void kron_sw_mul(const uint32_t* x, const uint32_t* y, uint32_t hw, uint32_t* z)
   }
 }
 
+#ifndef KRON_NO_SW
 void kron_mul_sw(const KronPlan* p, const int32_t* a, const int32_t* b, int32_t* out) {
   static uint32_t A[KRON_MAX_CHUNKS * KRON_MAX_WORDS], B[KRON_MAX_CHUNKS * KRON_MAX_WORDS], z[KRON_ZWORDS];
   static uint64_t acc[KRON_MAX_ACC]; static int64_t pa[513], pb[513];
@@ -101,3 +102,4 @@ void kron_mul_sw(const KronPlan* p, const int32_t* a, const int32_t* b, int32_t*
   kron_prefix(a, p->n, pa); kron_prefix(b, p->n, pb);
   kron_finish(p, acc, pa, pb, out);
 }
+#endif
