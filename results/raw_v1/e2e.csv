@@ -1,0 +1,29 @@
+tag,scheme,op,variant,reps,mean_us,min_us,max_us,std_us,ok,cmd,attempts
+E,mlkem768,keygen,ref,80,9909.0,9887.8,10062.9,42.5,1,E2E kem keygen ref 80,
+E,mlkem768,enc,ref,80,11109.5,11102.6,11482.3,42.0,1,E2E kem enc ref 80,
+E,mlkem768,dec,ref,80,12714.8,12702.1,13207.3,55.6,1,E2E kem dec ref 80,
+E,mlkem768,dec,cpu,80,12718.6,12705.8,13173.5,51.4,1,E2E kem dec cpu 80,
+E,mlkem768,dec,s0,80,17536.3,17511.7,18171.9,72.0,1,E2E kem dec s0 80 3,
+E,mlkem768,dec,s1,80,14812.2,14783.2,15416.9,69.2,1,E2E kem dec s1 80 3,
+E,mlkem768,dec,s2,80,13875.7,13858.8,14376.9,56.8,1,E2E kem dec s2 80 3,
+E,mlkem768,dec,s3,80,13362.1,13344.0,13796.7,49.3,1,E2E kem dec s3 80 3,
+E,mlkem768,indcpa,ref,320,1426.6,1422.7,1477.3,4.8,1,E2E kem indcpa ref 320,
+E,mlkem768,indcpa,cpu,320,1426.4,1422.7,1457.2,4.4,1,E2E kem indcpa cpu 320,
+E,mlkem768,indcpa,s0,320,6103.6,6085.6,6283.0,13.4,1,E2E kem indcpa s0 320 3,
+E,mlkem768,indcpa,s1,320,3454.6,3428.0,3532.9,9.5,1,E2E kem indcpa s1 320 3,
+E,mlkem768,indcpa,s2,320,2441.0,2429.1,2506.1,5.7,1,E2E kem indcpa s2 320 3,
+E,mlkem768,indcpa,s3,320,1910.0,1900.7,1990.3,7.0,1,E2E kem indcpa s3 320 3,
+E,mldsa44,verify,ref,32,22071.8,22066.2,22133.3,13.6,1,E2E dsa verify ref 32,0
+E,mldsa44,sign,ref,32,39818.2,29869.8,69950.6,17219.2,1,E2E dsa sign ref 32,na
+E,mldsa44,sign,cpu,32,40037.7,30020.3,70297.0,17346.9,1,E2E dsa sign cpu 32,64
+E,mldsa44,sign,s0,32,51737.4,38866.7,90659.5,22253.3,1,E2E dsa sign s0 32 2 3,64
+E,mldsa44,sign,s1,32,43893.2,32647.5,77892.7,19409.8,1,E2E dsa sign s1 32 2 3,64
+E,mldsa44,sign,s2,32,40460.6,30085.4,71879.1,17947.2,1,E2E dsa sign s2 32 2 3,64
+E,mldsa44,sign,s3,32,38762.2,28735.8,69144.4,17345.8,1,E2E dsa sign s3 32 2 3,64
+E,falcon512,sign,ref,8,365923.5,364742.4,367919.0,1128.1,1,E2E falcon sign ref 8,
+E,falcon512,verify,ref,128,4937.9,4926.4,5532.0,52.8,1,E2E falcon verify ref 128,
+E,falcon512,verify,cpu,128,4742.1,4732.6,5152.5,36.6,1,E2E falcon verify cpu 128,
+E,falcon512,verify,s0,128,17678.6,17653.0,18125.5,40.5,1,E2E falcon verify s0 128 8,
+E,falcon512,verify,s1,128,11373.2,11353.2,11768.3,36.2,1,E2E falcon verify s1 128 8,
+E,falcon512,verify,s2,128,8933.7,8905.0,9316.8,38.1,1,E2E falcon verify s2 128 8,
+E,falcon512,verify,s3,128,7190.4,7174.6,7454.6,24.2,1,E2E falcon verify s3 128 8,
