@@ -1,6 +1,6 @@
 # Polynomial products for ML-KEM, ML-DSA and Falcon on the ESP32 RSA/MPI unit
 
-The ESP32 has a hardware big-integer multiplier (the "RSA/MPI" unit, operands up to 2048 bits). In an earlier team course project (Cryptonite) we ran neural-network layers on it as
+The ESP32 has a hardware big-integer multiplier (the "RSA/MPI" unit, operands up to 2048 bits). In an earlier course project (Cryptonite) we ran neural-network layers on it as
 big-integer multiplies (Kronecker packing) and got a 3.9x speed-up from three changes to the data path around the multiply, while still ending up slower than a plain CPU kernel.
 This repo tries the same idea on post-quantum cryptography: pack a negacyclic polynomial product into integer multiplies on the unit, apply those three optimisations, then go further
 (prepacked keys, unrolled pack/unpack code, fused sums, shared operands), and compare against the PQClean clean-C NTT and against an NTT I tuned for this core.
@@ -14,6 +14,10 @@ All numbers are from one ESP32-D0WD-V3 at 240 MHz.
   c x t0 (0.61x), and loses for the full-width products. Against my tuned NTT it wins only for ML-DSA c x s (0.51x of the time). At whole-operation level it ties or loses: ML-KEM-768 decapsulation takes 1.02x
   the time of PQClean and 1.09x the time of the tuned NTT, ML-DSA-44 signing 0.91x and 0.99x, Falcon-512 verification 1.38x and 1.58x. The ceiling set by how much of each operation
   is polynomial products (Amdahl table below) is 1.1x to 1.4x against PQClean, and the measured results sit on it.
+
+## Contents
+
+[Which data each table comes from](#which-data-each-table-comes-from) · [Results](#results) · [The tuned NTT](#the-tuned-ntt) · [What was done](#what-was-done) · [Findings](#findings) · [Reproduce](#reproduce) · [Checks](#checks-that-were-run) · [Limits](#limits-of-the-numbers-and-what-is-unverified) · [Related work](#related-work) · [Credits](#credits) · [Citation](#citation)
 
 ## Which data each table comes from
 
@@ -240,6 +244,10 @@ ML-DSA-44 signing: c x s1, c x s2, c x t0; Falcon-512 verification: h x s2). Not
 6. **Negative results among the switches**: the fused sum (slower combined with fast code), the skipped Z clear (wrong results on the unit), prepack and X resident (small), second core and Karatsuba (not worth building, see above).
 7. **The fewest-multiplies plan is the best plan** in every case; the optimised path's best chunking differs from the earlier stages only for ML-DSA c x s (3 chunks, nine small multiplies, instead of 2).
 
+## Related work
+
+Using a big-integer coprocessor for lattice-scheme polynomial products through Kronecker substitution is not new. The papers I found describe repurposing an RSA/ECC coprocessor for Kyber, a Kyber-768 implementation on a smart card with an RSA coprocessor, and a generalisation called Kronecker+ ([IACR ePrint 2022/879](https://eprint.iacr.org/2022/879.pdf), [TCHES article](https://bmt.ub.rub.de/index.php/TCHES/article/download/7338/6510/2463)). I did not read them closely, and I did not compare my numbers with theirs, since the hardware differs. I also did not find a Dilithium or Falcon version in a short search, but I did not search for long. What this repo adds is a measurement on the ESP32's own unit, a port of the data-path optimisations from Cryptonite, a tuned NTT as the CPU baseline, and the negative results: the unit's multiplier alone is slower than a tuned NTT product for ML-KEM, and a skipped clear that works in a software model gives wrong products on the real unit.
+
 ## Reproduce
 
 ```
@@ -304,4 +312,15 @@ results/raw, tables, figures           final run;   results/raw_v1 first deliver
 
 * PQClean (https://github.com/PQClean/PQClean) for the clean-C ML-KEM, ML-DSA and Falcon implementations and `fips202`; licence files are kept in `vendor/pqclean`. Those implementations derive from the Kyber, Dilithium and Falcon reference code.
 * mbedtls (as shipped with ESP-IDF 4.4.7 in the Arduino-ESP32 core) for the baseline multiply path.
-* Cryptonite, the earlier team course project on neural-network inference on the same unit: `firmware/src/mpi_hw.h` is the register driver from there, and the first three optimisations are the ones studied there.
+* Cryptonite, the earlier course project on neural-network inference on the same unit: `firmware/src/mpi_hw.h` is the register driver from there, and the first three optimisations are the ones studied there.
+
+## Citation
+
+```
+@misc{pqc_optimizations_microcontroller,
+  author = {ankushachwani},
+  title  = {Polynomial products for ML-KEM, ML-DSA and Falcon on the ESP32 RSA/MPI unit},
+  year   = {2026},
+  howpublished = {\url{https://github.com/ankushachwani/pqc_optimizations_microcontroller}}
+}
+```
