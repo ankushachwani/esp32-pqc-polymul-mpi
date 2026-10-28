@@ -175,7 +175,7 @@ static void test_dsa(void) {
         rb_seed(700 + t); dsa_sign_ref(s1, &l1, msg, 20 + t, sk); rb_seed(700 + t); dsa_sign_ops(s2, &l2, msg, 20 + t, sk, &ops, &a);
         CHECK(l1 == l2 && !memcmp(s1, s2, l1), "ML-DSA tuned-NTT signature differs (cached=%d t=%d)", cached, t);
       }
-      tuned_free(tc);
+      tuned_dsa_free(tc);
     }
     for (unsigned opt = 0; opt < 64; opt += 1) { if (opt & 32) continue; void* fd = fast_dsa_setup(S1, S2, T0, 2, 3, opt); dsa_ops ops = { fd, NULL, fast_dsa_prod };
       for (int t = 0; t < 3; t++) { for (int i = 0; i < 64; i++) msg[i] = (uint8_t)rnd(); size_t l1, l2; int a = 0; rb_seed(800 + t); dsa_sign_ref(s1, &l1, msg, 30 + t, sk); rb_seed(800 + t); dsa_sign_ops(s2, &l2, msg, 30 + t, sk, &ops, &a);

@@ -5,7 +5,7 @@
 #include "fast_hooks.h"
 
 struct KemFast { int kind; KronPlan pT, p1; Packed* packT[3]; void* presum; Packed* pack1[3]; int32_t s[3 * 256]; uint32_t opt; size_t bytes; };
-struct DsaFast { int kind; KronPlan pcs, pct; Packed* ps[8]; Packed* pt[4]; int32_t s1[1024], s2[1024], t0[1024]; uint32_t opt; size_t bytes; };
+struct DsaFast { int kind; KronPlan pcs, pct; Packed* ps[8]; Packed* pt[4]; const int32_t *s1, *s2, *t0; uint32_t opt; size_t bytes; };        // s1, s2, t0: the caller's arrays, valid while the key is in use
 struct FalFast { int kind; KronPlan p; Packed* ph; int32_t h[512]; uint32_t opt; size_t bytes; };
 
 static size_t packed_bytes(const KronPlan* p, bool pre) { return (size_t)p->c * p->hw * 4 + (pre ? (size_t)(p->n + 1) * (p->narrow ? 4 : 8) : 0); }
@@ -27,7 +27,7 @@ void fast_kem_dot(void* ctx, const int32_t* u, int32_t* out) {
 
 void* fast_dsa_setup(const int32_t* s1, const int32_t* s2, const int32_t* t0, int c_cs, int c_ct0, uint32_t opt) {
   DsaFast* d = (DsaFast*)calloc(1, sizeof *d); d->kind = 2; d->opt = opt;
-  memcpy(d->s1, s1, sizeof d->s1); memcpy(d->s2, s2, sizeof d->s2); memcpy(d->t0, t0, sizeof d->t0);
+  d->s1 = s1; d->s2 = s2; d->t0 = t0;
   kron_plan(&KRON_CASES[CASE_MLDSA_C_S], c_cs, &d->pcs); kron_plan(&KRON_CASES[CASE_MLDSA_C_T0], c_ct0, &d->pct);
   for (int i = 0; i < 4; i++) {
     d->ps[i] = packed_new(&d->pcs, d->s1 + 256 * i); d->ps[4 + i] = packed_new(&d->pcs, d->s2 + 256 * i); d->pt[i] = packed_new(&d->pct, d->t0 + 256 * i);

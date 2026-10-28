@@ -57,9 +57,11 @@ static int get_plan(int ci, int c, KronPlan* p) {
   return 0;
 }
 
-// The static DRAM segment is full and the heap is fragmented once the worker's stack exists, so command scratch comes from one block reserved at boot.
-static uint8_t* g_pool; static size_t g_pool_off; static const size_t POOL_BYTES = 64 * 1024;
-static void* pool_alloc(size_t bytes) { bytes = (bytes + 7) & ~(size_t)7; if (!g_pool || g_pool_off + bytes > POOL_BYTES) return nullptr; void* r = g_pool + g_pool_off; g_pool_off += bytes; return r; }
+// The static DRAM segment is full and the heap is fragmented once the worker's stack exists (largest free block about 18 KB), so command scratch is taken in
+// pieces of at most 8 KB and given back when the command ends.
+static void* g_alloc[32]; static int g_nalloc;
+static void* pool_alloc(size_t bytes) { void* r = malloc(bytes); if (r && g_nalloc < 32) g_alloc[g_nalloc++] = r; else if (!r) Serial.println("ERR out of memory"); return r; }
+static void pool_release() { while (g_nalloc) free(g_alloc[--g_nalloc]); }
 static int32_t* g_vec;                                           // 4 x 512 scratch for the check commands
 static void vec_init() { if (!g_vec) g_vec = (int32_t*)pool_alloc(4 * 512 * 4); }
 static int32_t (*va)[512], (*vb)[512];                              // on the heap: the static DRAM segment is too small for them
@@ -188,7 +190,7 @@ static void cmd_fast(const char* kind, int ci, int c, int opt, int reps) {
   KronPlan pT, p1; if (kron_plan_terms(&k, c, T, &pT) || kron_plan(&k, c, &p1)) { Serial.println("ERR plan infeasible"); return; }
   if (shared && !pT.narrow) { Serial.println("ERR shared needs a narrow plan"); return; }
   // fixed operands
-  int32_t* fixb = (int32_t*)pool_alloc(4 * 512 * 4);                    // the fixed b vectors (secret-like)
+  int32_t* fixb = (int32_t*)pool_alloc(4 * n * 4);                    // the fixed b vectors (secret-like)
   const Packed* pk1[4] = {0, 0, 0, 0}; const Packed* pkT[4] = {0, 0, 0, 0}; void* presum = nullptr;
   auto build_fixed = [&](int32_t* const* bsrc) {
     for (int t = 0; t < 4; t++) { packed_free((Packed*)pk1[t]); packed_free((Packed*)pkT[t]); pk1[t] = pkT[t] = nullptr; }
@@ -214,11 +216,11 @@ static void cmd_fast(const char* kind, int ci, int c, int opt, int reps) {
   int32_t* av[4]; int32_t* bv[4]; int32_t* trial = (int32_t*)pool_alloc(4 * 512 * 4);
   for (int t = 0; t < 24; t++) {
     const int mode = t < 12 ? 0 : 1 + (t - 12) % 3, modeb = t < 12 ? 0 : 1 + (t - 12) / 4 % 3;
-    for (int u = 0; u < 4; u++) { av[u] = trial + u * 512; bv[u] = fixb + u * 512; fillvec(av[u], n, k.amin, k.amax, mode); fillvec(bv[u], n, k.bmin, k.bmax, modeb); }
+    for (int u = 0; u < 4; u++) { av[u] = trial + u * n; bv[u] = fixb + u * n; fillvec(av[u], n, k.amin, k.amax, mode); fillvec(bv[u], n, k.bmin, k.bmax, modeb); }
     build_fixed(bv); reference(av, bv); run(av, bv, opt); checks++; if (!same()) bad++;
   }
   // timing: fixed operands as in the real use (built once), varying operand rotates over the pool
-  for (int u = 0; u < 4; u++) { bv[u] = fixb + u * 512; memcpy(bv[u], vb[u], n * 4); }
+  for (int u = 0; u < 4; u++) { bv[u] = fixb + u * n; memcpy(bv[u], vb[u], n * 4); }
   build_fixed(bv);
   int32_t* arot[4];
   for (int u = 0; u < 4; u++) arot[u] = va[u];
@@ -341,7 +343,7 @@ static void e2e_kem(const char* op, const char* var, int reps, int c1) {
 }
 
 static uint8_t dpk[DSA_PK], dsk[DSA_SK]; static bool dsa_ready = false; static uint8_t dmsg[4][48];
-static uint8_t (*dsig_ref)[DSA_SIG]; static size_t dsig_len[4];
+static uint8_t* dsig_ref[4]; static size_t dsig_len[4];
 static void dsa_setup() {
   if (dsa_ready) return;
   rb_seed(11); dsa_keypair(dpk, dsk);
@@ -358,11 +360,11 @@ static void e2e_dsa(const char* op, const char* var, int reps, int c1, int c2) {
     for (int r = 0; r < reps; r++) { const int i = r & 3; const uint32_t t0 = cyc(); const int rc = dsa_verify(dsig_ref[i], dsig_len[i], dmsg[i], 48, dpk); st.add(cyc() - t0); if (rc) ok = 0; }
     report("mldsa44", op, var, reps, st, ok, -1, 0, "attempts=0"); return;
   }
-  void* ctx = nullptr; dsa_ops ops = {nullptr, nullptr, nullptr}; int32_t* sv = nullptr;
+  void* ctx = nullptr; dsa_ops ops = {nullptr, nullptr, nullptr}; int32_t *sv = nullptr, *sv2 = nullptr, *sv3 = nullptr;
   if (v == 10 || v == 11 || v >= 100) {
-    sv = (int32_t*)pool_alloc(3 * 1024 * 4); dsa_unpack_secret(dsk, sv, sv + 1024, sv + 2048);
-    if (v == 10 || v == 11) { ctx = tuned_dsa_setup(v == 11, sv, sv + 1024, sv + 2048); ops.ctx = ctx; ops.begin = tuned_dsa_begin; ops.prod = tuned_dsa_prod; }
-    else { ctx = fast_dsa_setup(sv, sv + 1024, sv + 2048, c1, c2, (uint32_t)(v - 100)); mem = fast_ctx_bytes(ctx); ops.ctx = ctx; ops.begin = nullptr; ops.prod = fast_dsa_prod; }
+    sv = (int32_t*)pool_alloc(1024 * 4); sv2 = (int32_t*)pool_alloc(1024 * 4); sv3 = (int32_t*)pool_alloc(1024 * 4); dsa_unpack_secret(dsk, sv, sv2, sv3);
+    if (v == 10 || v == 11) { ctx = tuned_dsa_setup(v == 11, sv, sv2, sv3); ops.ctx = ctx; ops.begin = tuned_dsa_begin; ops.prod = tuned_dsa_prod; }
+    else { ctx = fast_dsa_setup(sv, sv2, sv3, c1, c2, (uint32_t)(v - 100)); mem = fast_ctx_bytes(ctx); ops.ctx = ctx; ops.begin = nullptr; ops.prod = fast_dsa_prod; }
   }
   for (int r = 0; r < reps; r++) {
     const int i = r & 3; int att = 1; g_prod_cycles = 0;
@@ -377,7 +379,7 @@ static void e2e_dsa(const char* op, const char* var, int reps, int c1, int c2) {
   }
   char ex[48]; snprintf(ex, sizeof ex, "attempts=%d", attempts_total);
   report("mldsa44", op, var, reps, st, ok, v == -2 ? -1 : prod / reps, mem, v == -2 ? "attempts=na" : ex);
-  if (v == 10 || v == 11) tuned_free(ctx); if (v >= 100) fast_free(ctx);
+  if (v == 10 || v == 11) tuned_dsa_free(ctx); if (v >= 100) fast_free(ctx);
 }
 
 static uint8_t fpk[FAL_PK], fsk[FAL_SK], fsig[4][FAL_SIG + 8]; static size_t fslen[4]; static uint8_t fmsg[4][48]; static bool fal_ready = false;
@@ -420,7 +422,7 @@ static void e2e_falcon(const char* op, const char* var, int reps, int c1) {
 // ---------------------------------------------------------------- command loop
 static char* tok(char** s) { while (**s == ' ') (*s)++; if (!**s) return nullptr; char* t = *s; while (**s && **s != ' ') (*s)++; if (**s) { **s = 0; (*s)++; } return t; }
 static void handle(char* line) {
-  g_pool_off = 0; va = vb = nullptr; g_vec = nullptr; g_out = nullptr;                // command scratch is per command
+  pool_release(); va = vb = nullptr; g_vec = nullptr; g_out = nullptr;                    // command scratch is per command
   char* s = line; char* cmd = tok(&s); if (!cmd) return;
   char* a[8] = {0}; for (int i = 0; i < 8; i++) a[i] = tok(&s);
   auto I = [&](int i) { return a[i] ? atoi(a[i]) : 0; };
@@ -462,7 +464,8 @@ static void worker(void*) {
 
 void setup() {
   Serial.begin(115200); delay(300);
-  g_pool = (uint8_t*)malloc(POOL_BYTES); dsig_ref = (uint8_t(*)[DSA_SIG])malloc(4 * DSA_SIG); cpu_tuned_prepare();
+  for (int i = 0; i < 4; i++) dsig_ref[i] = (uint8_t*)malloc(DSA_SIG);
+  cpu_tuned_prepare();
   xTaskCreatePinnedToCore(worker, "pqc", 98304, nullptr, 1, nullptr, 1);
 }
 void loop() { vTaskDelay(1000); }

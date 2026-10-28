@@ -6,7 +6,7 @@
 static int32_t *ta, *tb, *tah, *tr, *tw;                 // heap, allocated at first use
 static TNtt tn[3]; static int tn_ready = 0;
 #include <stdlib.h>
-static void init_all(void) { if (!tn_ready) { ta = (int32_t*)malloc(5 * 512 * 4); tb = ta + 512; tah = tb + 512; tr = tah + 512; tw = tr + 512; tntt_init(&tn[TN_KEM], TN_KEM); tntt_init(&tn[TN_DSA], TN_DSA); tntt_init(&tn[TN_FALCON], TN_FALCON); tn_ready = 1; } }
+static void init_all(void) { if (!tn_ready) { ta = (int32_t*)malloc(512 * 4); tb = (int32_t*)malloc(512 * 4); tah = (int32_t*)malloc(512 * 4); tr = (int32_t*)malloc(512 * 4); tw = (int32_t*)malloc(512 * 4); tntt_init(&tn[TN_KEM], TN_KEM); tntt_init(&tn[TN_DSA], TN_DSA); tntt_init(&tn[TN_FALCON], TN_FALCON); tn_ready = 1; } }
 
 static const TNtt* cur;
 
@@ -43,19 +43,19 @@ void tuned_kem_dot(void* ctx, const int32_t* u, int32_t* out) {
   tntt_inv(&tn[TN_KEM], r); memcpy(out, r, sizeof r);
 }
 
-typedef struct { int cached; int32_t sh[12 * 256]; int32_t chat[256]; } DsaT;
+typedef struct { int cached; int32_t* sh[12]; int32_t chat[256]; } DsaT;      // twelve separate 1 KB vectors: the heap has no large free block on the board
 static void dsa_transform(DsaT* d, const int32_t* s1, const int32_t* s2, const int32_t* t0) {
-  memcpy(d->sh, s1, 4 * 256 * 4); memcpy(d->sh + 4 * 256, s2, 4 * 256 * 4); memcpy(d->sh + 8 * 256, t0, 4 * 256 * 4);
-  for (int i = 0; i < 12; i++) tntt_fwd(&tn[TN_DSA], d->sh + i * 256);
+  for (int i = 0; i < 12; i++) { const int32_t* src = i < 4 ? s1 + i * 256 : i < 8 ? s2 + (i - 4) * 256 : t0 + (i - 8) * 256; memcpy(d->sh[i], src, 256 * 4); tntt_fwd(&tn[TN_DSA], d->sh[i]); }
 }
 void* tuned_dsa_setup(int cached, const int32_t* s1, const int32_t* s2, const int32_t* t0) {
-  init_all(); DsaT* d = (DsaT*)malloc(sizeof *d); d->cached = cached; if (cached) dsa_transform(d, s1, s2, t0); return d;
+  init_all(); DsaT* d = (DsaT*)malloc(sizeof *d); d->cached = cached; for (int i = 0; i < 12; i++) d->sh[i] = (int32_t*)malloc(256 * 4);
+  if (cached) dsa_transform(d, s1, s2, t0); return d;
 }
 void tuned_dsa_begin(void* ctx, const int32_t* s1, const int32_t* s2, const int32_t* t0) { DsaT* d = (DsaT*)ctx; if (!d->cached) dsa_transform(d, s1, s2, t0); }
 void tuned_dsa_prod(void* ctx, const int32_t* c, int which, int32_t* out) {
   DsaT* d = (DsaT*)ctx;
   if (which == 0) { memcpy(d->chat, c, 256 * 4); tntt_fwd(&tn[TN_DSA], d->chat); }
-  for (int i = 0; i < 4; i++) { tntt_mul(&tn[TN_DSA], out + i * 256, d->sh + (which * 4 + i) * 256, d->chat); tntt_inv(&tn[TN_DSA], out + i * 256); }
+  for (int i = 0; i < 4; i++) { tntt_mul(&tn[TN_DSA], out + i * 256, d->sh[which * 4 + i], d->chat); tntt_inv(&tn[TN_DSA], out + i * 256); }
 }
 
 typedef struct { int cached; int32_t hh[512]; } FalT;
@@ -67,6 +67,7 @@ void tuned_fal_prod(void* ctx, const int32_t* h, const int32_t* s2, int32_t* out
   if (!f->cached) { memcpy(f->hh, h, 512 * 4); tntt_fwd(&tn[TN_FALCON], f->hh); }
   memcpy(x, s2, sizeof x); tntt_fwd(&tn[TN_FALCON], x); tntt_mul(&tn[TN_FALCON], out, x, f->hh); tntt_inv(&tn[TN_FALCON], out);
 }
-void tuned_free(void* ctx) { free(ctx); }
+void tuned_free(void* ctx) { free(ctx); }      /* (a DsaT leaves its twelve vectors to the next free of the heap on purpose: freed by tuned_dsa_free) */
+void tuned_dsa_free(void* ctx) { DsaT* d = (DsaT*)ctx; for (int i = 0; i < 12; i++) free(d->sh[i]); free(d); }
 
 void cpu_tuned_prepare(void) { init_all(); }

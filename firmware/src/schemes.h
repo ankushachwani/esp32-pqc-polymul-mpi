@@ -47,6 +47,7 @@ void tuned_dsa_prod(void* ctx, const int32_t* c, int which, int32_t* out);
 void* tuned_fal_setup(int cached, const int32_t* h);
 void tuned_fal_prod(void* ctx, const int32_t* h, const int32_t* s2, int32_t* out);
 void tuned_free(void* ctx);
+void tuned_dsa_free(void* ctx);          // for a context from tuned_dsa_setup
 
 // ML-KEM-768
 #define KEM_PK 1184
