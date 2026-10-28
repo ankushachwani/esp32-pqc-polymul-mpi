@@ -15,12 +15,16 @@ CASE_NOTE = {
 def rd(name): return pd.read_csv(os.path.join(RAW, name + '.csv'))
 
 
-def md(df, path, floatfmt='%.2f'):
+def md(df, path):
     cols = list(df.columns)
+    def cell(col, v):
+        if isinstance(v, float):
+            return '%.2f' % v if any(t in col for t in ('us', 'ms', '/', 'vs', 'speedup')) else '%d' % v
+        return str(v)
     with open(path, 'w') as f:
         f.write('| ' + ' | '.join(cols) + ' |\n|' + '---|' * len(cols) + '\n')
         for _, r in df.iterrows():
-            f.write('| ' + ' | '.join((floatfmt % v) if isinstance(v, float) else str(v) for v in r.values) + ' |\n')
+            f.write('| ' + ' | '.join(cell(c, v) for c, v in zip(cols, r.values)) + ' |\n')
 
 
 def main():
@@ -38,13 +42,13 @@ def main():
             t = s[s.stage == st]; r = t.loc[t.mean_us.idxmin()]
             row['%s (us)' % STAGE_LABEL[st]] = r.mean_us; row['%s plan' % STAGE_LABEL[st]] = '%d chunks, %d mults' % (r.c, r.multiplies)
         last = STAGE_LABEL['overlap']
-        row['best MPI / NTT full'] = row['%s (us)' % last] / ntt_full.mean_us
-        row['best MPI / NTT pre'] = row['%s (us)' % last] / ntt_pre.mean_us
+        row['overlap / NTT full'] = row['%s (us)' % last] / ntt_full.mean_us
+        row['overlap / NTT pre'] = row['%s (us)' % last] / ntt_pre.mean_us
         row['S0 -> S3 speedup'] = row['%s (us)' % STAGE_LABEL['mbedtls_api']] / row['%s (us)' % last]
         c = chk[chk.case == case]; row['vectors checked (all plans, stages)'] = int(c.vectors.sum()); row['mismatches'] = int(c.bad.sum()) + int(chkcpu[chkcpu.case == case].bad.sum())
         rows.append(row)
     pm = pd.DataFrame(rows); pm.to_csv(os.path.join(OUT, 'polymul_latency.csv'), index=False)
-    short = pm[['case', 'NTT full (us)', 'NTT, a pre-transformed (us)'] + ['%s (us)' % STAGE_LABEL[s] for s in STAGES] + ['best MPI / NTT full', 'best MPI / NTT pre', 'S0 -> S3 speedup', 'mismatches']]
+    short = pm[['case', 'NTT full (us)', 'NTT, a pre-transformed (us)'] + ['%s (us)' % STAGE_LABEL[s] for s in STAGES] + ['overlap / NTT full', 'overlap / NTT pre', 'S0 -> S3 speedup', 'mismatches']]
     md(short, os.path.join(OUT, 'polymul_latency.md'))
 
     # --- where the time goes at the direct-driver stage
@@ -56,18 +60,40 @@ def main():
 
     # --- multiplier alone
     hw = rd('hwlat'); hw = hw[['bits', 'mbedtls_us', 'direct_us', 'load_us', 'compute_us', 'read_us', 'mbedtls_exact', 'direct_exact']]
-    hw.to_csv(os.path.join(OUT, 'multiplier.csv'), index=False); md(hw, os.path.join(OUT, 'multiplier.md'))
+    hw.to_csv(os.path.join(OUT, 'multiplier.csv'), index=False); md(hw.astype(object).where(hw != -1, 'n/a'), os.path.join(OUT, 'multiplier.md'))
 
     # --- whole schemes
     e = rd('e2e'); rows = []
     for (scheme, op), g in e.groupby(['scheme', 'op'], sort=False):
         ref = g[g.variant == 'ref'].iloc[0].mean_us
+        base = g[g.variant == 'cpu'].iloc[0].mean_us if (g.variant == 'cpu').any() else ref
+        att = None
+        if 'attempts' in g.columns:
+            a = pd.to_numeric(g.attempts, errors='coerce').dropna()
+            att = a.iloc[0] if len(a) else None
         for _, r in g.iterrows():
             lab = {'ref': 'PQClean as shipped', 'cpu': 'copy of it, NTT'}[r.variant] if r.variant in ('ref', 'cpu') else 'product on MPI, ' + STAGE_LABEL[STAGES[int(r.variant[1])]]
-            rows.append({'scheme': scheme, 'op': op, 'variant': lab, 'mean_us': r.mean_us, 'min_us': r.min_us, 'std_us': r.std_us, 'vs PQClean': r.mean_us / ref, 'output identical': 'yes' if r.ok == 1 else 'NO',
+            rows.append({'scheme': scheme, 'op': op, 'variant': lab, 'mean_us': r.mean_us, 'min_us': r.min_us, 'std_us': r.std_us, 'vs PQClean': r.mean_us / ref, 'vs NTT copy': r.mean_us / base,
+                         'us per rejection pass': (r.mean_us * r.reps / att) if att else '', 'output identical': 'yes' if r.ok == 1 else 'NO',
                          'reps': r.reps, 'cmd': r.cmd})
     et = pd.DataFrame(rows); et.to_csv(os.path.join(OUT, 'e2e.csv'), index=False)
-    md(et[['scheme', 'op', 'variant', 'mean_us', 'std_us', 'vs PQClean', 'output identical', 'reps']], os.path.join(OUT, 'e2e.md'))
+    md(et[['scheme', 'op', 'variant', 'mean_us', 'std_us', 'vs PQClean', 'vs NTT copy', 'us per rejection pass', 'output identical', 'reps']], os.path.join(OUT, 'e2e.md'))
+    # the host prototype's plans (slot width, operand size, multiplies) must be the ones the firmware computed
+    pp = pd.read_csv(os.path.join(OUT, 'packing_plan.csv')); m = rd('plans').merge(pp, left_on=['case', 'c'], right_on=['case', 'chunks'])
+    assert len(m) == len(rd('plans')) and (m.slot_bits_x == m.slot_bits_y).all() and (m.hw_words * 32 == m.padded_operand_bits).all() and (m.multiplies == m.mpi_multiplies).all(), 'prototype and firmware plans differ'
+    print('host prototype and firmware agree on all %d plans' % len(m))
+    # compact view for the README: one row per operation, times in ms
+    rows = []
+    for (scheme, op), g in et.groupby(['scheme', 'op'], sort=False):
+        if len(g) == 1: continue
+        t = {r.variant: r.mean_us / 1000.0 for r in g.itertuples()}
+        mpi = [v for k, v in t.items() if k.startswith('product on MPI')]
+        base = t.get('copy of it, NTT', t['PQClean as shipped'])
+        rows.append({'operation': '%s %s' % (scheme, {'dec': 'decapsulation', 'indcpa': 'decrypt step of decapsulation'}.get(op, op)), 'PQClean (ms)': t['PQClean as shipped'], 'NTT copy (ms)': t.get('copy of it, NTT', float('nan')),
+                     'mbedtls API (ms)': mpi[0], '+ limb I/O (ms)': mpi[1], '+ direct driver (ms)': mpi[2], '+ overlap (ms)': mpi[3], 'overlap / NTT copy': mpi[3] / base,
+                     'outputs identical': 'yes' if (g['output identical'] == 'yes').all() else 'NO'})
+    ec = pd.DataFrame(rows); ec.to_csv(os.path.join(OUT, 'e2e_compact.csv'), index=False)
+    md(ec, os.path.join(OUT, 'e2e_compact.md'))
     print('tables written to', OUT)
 
 
